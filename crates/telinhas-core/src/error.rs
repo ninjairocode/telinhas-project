@@ -20,6 +20,9 @@ pub enum Error {
     #[error("resposta inesperada do dispositivo: {0:?}")]
     BadResponse(String),
 
+    #[error("valor inválido: {0}")]
+    InvalidValue(String),
+
     #[error("sem resposta do dispositivo ao comando `{0}`")]
     NoResponse(String),
 }

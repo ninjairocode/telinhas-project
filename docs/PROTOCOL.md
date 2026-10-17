@@ -28,8 +28,13 @@ Implementação própria em `crates/telinhas-core/src/protocol/by.rs`.
   de 14 805 bytes (15 fatias) reenviado a cada 2 s: a tela ficou toda vermelha.
   Limite de 0xC7FFF bytes por JPEG (do painel 6", não testado aqui).
 
-Ainda não testado aqui: `brightness` (`{"value": 0–100}`), `rotate`
-(`{"degree": N}`), taxa máxima de quadros.
+- `POST brightness 1` com `{"value": 30}` e `POST rotate 1` com
+  `{"degree": 90}` respondem `200`, têm efeito visível e ficam gravados: o
+  `conn` seguinte devolve `brightness`/`degree` novos. (O quadro do brilho tem
+  90 = `0x5A` bytes, então o campo de tamanho sai escapado como `5B 01`;
+  confirma o escape.)
+
+Ainda não testado aqui: rotações 180/270, taxa máxima de quadros.
 
 ## Análise estática do instalador
 

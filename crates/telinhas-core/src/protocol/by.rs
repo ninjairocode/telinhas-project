@@ -20,6 +20,8 @@
 //! do tamanho e do texto, e entre os delimitadores `5A` vira `5B 01` e `5B`
 //! vira `5B 02`. Cada quadro cabe num único relatório HID.
 
+use serde::Deserialize;
+
 use crate::transport::REPORT_LEN;
 use crate::{Error, Result};
 
@@ -147,6 +149,32 @@ impl Response {
     }
 }
 
+/// Estado do painel, vindo do corpo da resposta ao `conn`.
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct Status {
+    pub version: Versions,
+    pub brightness: u8,
+    pub degree: u16,
+    /// Segundos sem quadros até a tela voltar à própria imagem.
+    pub timeout: u32,
+}
+
+#[derive(Debug, Clone, Default, PartialEq, Eq, Deserialize)]
+#[serde(default)]
+pub struct Versions {
+    pub app: String,
+    pub firmware: String,
+    pub sdk: String,
+    pub hardware: String,
+}
+
+impl Status {
+    pub fn parse(json: &str) -> Result<Self> {
+        serde_json::from_str(json).map_err(|e| Error::BadResponse(format!("{e}: {json}")))
+    }
+}
+
 /// Tamanho do cabeçalho de cada fatia de imagem.
 pub const SLICE_HEADER_LEN: usize = 24;
 /// Bytes de JPEG por fatia.
@@ -191,6 +219,17 @@ pub fn image_slices(jpeg: &[u8], counter: u8) -> Result<Vec<[u8; REPORT_LEN]>> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn le_estado_do_conn() {
+        // Corpo real da TH360 V3 Ultra, sem o número de série.
+        let s = Status::parse(
+            r#"{"OS":"Linux","version":{"app":"V1.0.3","firmware":"V1.0.3","sdk":"V1.2.7","hardware":"V1.0"},"space":78892,"brightness":100,"degree":0,"osdState":0,"mode":0,"logo":1,"timeout":5,"bootFinish":1}"#,
+        )
+        .unwrap();
+        assert_eq!((s.brightness, s.degree, s.timeout), (100, 0, 5));
+        assert_eq!(s.version.firmware, "V1.0.3");
+    }
 
     #[test]
     fn fatias_de_imagem() {

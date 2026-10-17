@@ -12,7 +12,8 @@ só lugar. Escrito em Rust. Meta: distribuir pela loja COSMIC do Pop!_OS.
 | Protocolo BY: handshake `conn` | funciona, testado em hardware (`telinhas probe`) |
 | Preparo de imagem (recorte 720x720 + JPEG) | implementado (`telinhas prepare`) |
 | Envio de imagem para a tela | funciona, testado em hardware (`telinhas show`) |
-| Brilho, rotação, vídeo | pendente |
+| Brilho e rotação | funciona, testado em hardware (`telinhas set`) |
+| Vídeo / quadros contínuos | pendente |
 | Interface gráfica (libcosmic) | pendente, depois do protocolo |
 | Empacotamento AppImage (CI) | pronto, nunca executado |
 | Empacotamento Flatpak (exigido pela loja COSMIC) | pendente |
@@ -36,9 +37,10 @@ sudo udevadm control --reload && sudo udevadm trigger   # depois reconecte o USB
 ./Telinhas-x86_64.AppImage probe                        # handshake; mostra versões
 ./Telinhas-x86_64.AppImage show foto.png --seconds 30   # mostra uma imagem
 ./Telinhas-x86_64.AppImage show --color ff0000          # cor sólida
+./Telinhas-x86_64.AppImage set --brightness 60 --rotate 90
 ```
 
-`probe` e `show` enviam dados ao dispositivo; `--dry-run` mostra os bytes sem
+`probe`, `show` e `set` enviam dados ao dispositivo; `--dry-run` mostra os bytes sem
 enviar. A tela volta à própria imagem ~5 s depois que os quadros param.
 
 ## Compilar localmente

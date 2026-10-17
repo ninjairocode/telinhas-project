@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::time::{Duration, Instant};
 
+use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Parser, Subcommand};
 use hidapi::HidApi;
 use telinhas_core::devices::{self, thermaltake};
@@ -56,6 +57,23 @@ enum Cmd {
         #[arg(long)]
         dry_run: bool,
     },
+    /// Ajusta brilho e/ou rotação da tela
+    Set {
+        /// Brilho de 0 a 100
+        #[arg(long, value_parser = clap::value_parser!(u8).range(0..=100))]
+        brightness: Option<u8>,
+        /// Rotação em graus
+        #[arg(
+            long,
+            value_name = "GRAUS",
+            value_parser = PossibleValuesParser::new(["0", "90", "180", "270"])
+                .map(|s| s.parse::<u16>().unwrap())
+        )]
+        rotate: Option<u16>,
+        /// Só mostra os bytes que seriam enviados, sem abrir o dispositivo
+        #[arg(long)]
+        dry_run: bool,
+    },
     /// Converte uma imagem para o JPEG que a tela espera (não envia nada)
     Prepare {
         /// Imagem de entrada (JPEG, PNG ou WebP)
@@ -75,6 +93,21 @@ enum Cmd {
     },
     /// Imprime a regra udev necessária para acessar o dispositivo sem root
     UdevRules,
+}
+
+/// Abre a primeira tela conhecida e faz o handshake.
+fn open_lcd() -> Result<thermaltake::ThermaltakeLcd, Box<dyn std::error::Error>> {
+    let api = HidApi::new()?;
+    let Some(dev) = devices::detect(&api).into_iter().next() else {
+        return Err("nenhuma tela conhecida encontrada".into());
+    };
+    let mut lcd = thermaltake::ThermaltakeLcd::new(HidTransport::open(&api, dev.vid, dev.pid)?);
+    let s = lcd.connect()?;
+    println!(
+        "Conectado a {} (firmware {}; brilho {}, rotação {}°)",
+        dev.name, s.version.firmware, s.brightness, s.degree
+    );
+    Ok(lcd)
 }
 
 fn parse_rgb(s: &str) -> Result<[u8; 3], String> {
@@ -184,15 +217,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            let api = HidApi::new()?;
-            let Some(dev) = devices::detect(&api).into_iter().next() else {
-                eprintln!("Nenhuma tela conhecida encontrada.");
-                std::process::exit(1);
-            };
-            let mut lcd =
-                thermaltake::ThermaltakeLcd::new(HidTransport::open(&api, dev.vid, dev.pid)?);
-            let hello = lcd.connect()?;
-            println!("Conectado: {}", hello.body);
+            let mut lcd = open_lcd()?;
             let end = Instant::now() + Duration::from_secs(seconds);
             let mut n = 0u32;
             while Instant::now() < end {
@@ -202,6 +227,45 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 std::thread::sleep(Duration::from_millis(interval_ms));
             }
             println!("Pronto; a tela volta à própria imagem após o timeout dela.");
+        }
+        Cmd::Set {
+            brightness,
+            rotate,
+            dry_run,
+        } => {
+            let mut cmds = Vec::new();
+            if let Some(v) = brightness {
+                cmds.push(("brightness", format!(r#"{{"value": {v}}}"#)));
+            }
+            if let Some(d) = rotate {
+                cmds.push(("rotate", format!(r#"{{"degree": {d}}}"#)));
+            }
+            if cmds.is_empty() {
+                eprintln!("Nada a ajustar; use --brightness e/ou --rotate.");
+                std::process::exit(2);
+            }
+            for (cmd, json) in &cmds {
+                let frame = by::encode_frame(&by::request(cmd, by::DEFAULT_SEQ, json))?;
+                println!("{cmd} {json} ({} bytes): {:02x?}", frame.len(), frame);
+            }
+            if dry_run {
+                return Ok(());
+            }
+
+            let mut lcd = open_lcd()?;
+            if let Some(v) = brightness {
+                lcd.set_brightness(v)?;
+                println!("Brilho ajustado para {v}.");
+            }
+            if let Some(d) = rotate {
+                lcd.set_rotation(d)?;
+                println!("Rotação ajustada para {d}°.");
+            }
+            let s = lcd.connect()?;
+            println!(
+                "Estado agora: brilho {}, rotação {}°",
+                s.brightness, s.degree
+            );
         }
         Cmd::Prepare {
             input,

@@ -62,8 +62,28 @@ impl ThermaltakeLcd {
     }
 
     /// Handshake; a resposta traz versões, brilho, rotação e `timeout`.
-    pub fn connect(&mut self) -> Result<by::Response> {
-        self.command("conn", "")
+    pub fn connect(&mut self) -> Result<by::Status> {
+        by::Status::parse(&self.command("conn", "")?.body)
+    }
+
+    /// Brilho de 0 a 100.
+    pub fn set_brightness(&mut self, value: u8) -> Result<()> {
+        if value > 100 {
+            return Err(Error::InvalidValue(format!("brilho {value} (use 0–100)")));
+        }
+        self.command("brightness", &format!(r#"{{"value": {value}}}"#))?;
+        Ok(())
+    }
+
+    /// Rotação da imagem: 0, 90, 180 ou 270 graus.
+    pub fn set_rotation(&mut self, degree: u16) -> Result<()> {
+        if !matches!(degree, 0 | 90 | 180 | 270) {
+            return Err(Error::InvalidValue(format!(
+                "rotação {degree} (use 0, 90, 180 ou 270)"
+            )));
+        }
+        self.command("rotate", &format!(r#"{{"degree": {degree}}}"#))?;
+        Ok(())
     }
 
     /// Liga ou desliga o modo de quadros ao vivo. Ligado, a tela volta à
