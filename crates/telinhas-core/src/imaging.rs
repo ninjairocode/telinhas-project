@@ -1,6 +1,6 @@
 //! Preparo de imagens para as telas: recorta, redimensiona e codifica em JPEG.
 //!
-//! Não fala com o hardware; serve tanto à CLI quanto à futura interface.
+//! Não fala com o hardware; serve à CLI e à interface gráfica.
 
 use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
@@ -10,16 +10,33 @@ use crate::Result;
 /// Qualidade JPEG padrão (1–100).
 pub const DEFAULT_QUALITY: u8 = 85;
 
+/// Imagem pronta para a tela: o JPEG a enviar e os pixels RGBA para prévia.
+#[derive(Debug, Clone)]
+pub struct Prepared {
+    pub jpeg: Vec<u8>,
+    /// `width * height * 4` bytes, RGBA, linha a linha.
+    pub rgba: Vec<u8>,
+    pub width: u32,
+    pub height: u32,
+}
+
 /// Decodifica `input` (JPEG, PNG ou WebP), preenche `width`x`height`
-/// recortando o excesso pelo centro e devolve um JPEG.
+/// recortando o excesso pelo centro e devolve o JPEG e a prévia RGBA.
+pub fn prepare(input: &[u8], width: u32, height: u32, quality: u8) -> Result<Prepared> {
+    let img = image::load_from_memory(input)?.resize_to_fill(width, height, FilterType::Lanczos3);
+    let mut jpeg = Vec::new();
+    JpegEncoder::new_with_quality(&mut jpeg, quality.clamp(1, 100)).encode_image(&img.to_rgb8())?;
+    Ok(Prepared {
+        jpeg,
+        rgba: img.to_rgba8().into_raw(),
+        width,
+        height,
+    })
+}
+
+/// Como [`prepare`], mas só o JPEG.
 pub fn prepare_jpeg(input: &[u8], width: u32, height: u32, quality: u8) -> Result<Vec<u8>> {
-    let img = image::load_from_memory(input)?;
-    let rgb = img
-        .resize_to_fill(width, height, FilterType::Lanczos3)
-        .to_rgb8();
-    let mut out = Vec::new();
-    JpegEncoder::new_with_quality(&mut out, quality.clamp(1, 100)).encode_image(&rgb)?;
-    Ok(out)
+    Ok(prepare(input, width, height, quality)?.jpeg)
 }
 
 /// JPEG de uma cor só; útil para testar a tela.
@@ -48,6 +65,13 @@ mod tests {
         let jpeg = prepare_jpeg(&png(1920, 1080), 720, 720, DEFAULT_QUALITY).unwrap();
         let out = image::load_from_memory_with_format(&jpeg, ImageFormat::Jpeg).unwrap();
         assert_eq!((out.width(), out.height()), (720, 720));
+    }
+
+    #[test]
+    fn previa_rgba_tem_o_tamanho_certo() {
+        let p = prepare(&png(300, 500), 72, 72, DEFAULT_QUALITY).unwrap();
+        assert_eq!((p.width, p.height), (72, 72));
+        assert_eq!(p.rgba.len(), 72 * 72 * 4);
     }
 
     #[test]

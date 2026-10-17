@@ -14,23 +14,41 @@ só lugar. Escrito em Rust. Meta: distribuir pela loja COSMIC do Pop!_OS.
 | Envio de imagem para a tela | funciona, testado em hardware (`telinhas show`) |
 | Brilho e rotação | funciona, testado em hardware (`telinhas set`) |
 | Vídeo / quadros contínuos | pendente |
-| Interface gráfica (libcosmic) | pendente, depois do protocolo |
+| Interface gráfica (libcosmic) | funciona, testada em hardware (`telinhas-gui`) |
 | Empacotamento AppImage (CI) | pronto, nunca executado |
 | Empacotamento Flatpak (exigido pela loja COSMIC) | pendente |
 
 ## Gerar o AppImage (sem instalar nada)
 
-1. Crie um repositório no GitHub e envie esta pasta (`git init`, `git add .`,
-   `git commit`, `git push`).
+1. Envie o código para o GitHub (`git push`).
 2. Aba **Actions → AppImage → Run workflow**. Ao terminar, baixe o artefato
    `Telinhas-AppImage`.
 3. `chmod +x Telinhas-x86_64.AppImage`
 
 ## Usar
 
+Na primeira vez, instale a regra udev (acesso à tela sem root):
+
 ```
 ./Telinhas-x86_64.AppImage udev-rules | sudo tee /etc/udev/rules.d/99-telinhas.rules
 sudo udevadm control --reload && sudo udevadm trigger   # depois reconecte o USB
+```
+
+### Interface gráfica
+
+Abra o AppImage sem argumentos (ou `telinhas-gui`). Escolha uma imagem, veja a
+prévia recortada em 720x720, clique em **Mostrar na tela** e ajuste brilho e
+rotação. Sem permissão de acesso, a janela oferece o comando da regra udev para
+copiar.
+
+A imagem fica na tela **enquanto o app estiver aberto** (ele a reenvia a cada
+2 s); ao fechar, a tela volta à própria imagem em ~5 s.
+
+### Linha de comando
+
+Com argumentos, o AppImage roda a CLI (`telinhas`):
+
+```
 ./Telinhas-x86_64.AppImage list
 ./Telinhas-x86_64.AppImage listen --seconds 10          # somente leitura
 ./Telinhas-x86_64.AppImage prepare foto.png -o foto.jpg # gera o JPEG 720x720
@@ -46,9 +64,12 @@ enviar. A tela volta à própria imagem ~5 s depois que os quadros param.
 ## Compilar localmente
 
 ```
-sudo apt install libudev-dev pkg-config
-cargo build --release
+sudo apt install libudev-dev libxkbcommon-dev pkg-config
+cargo build --release            # gera target/release/telinhas e telinhas-gui
+cargo build --release -p telinhas  # só a CLI, sem o libcosmic
 ```
+
+O primeiro build da interface baixa e compila o libcosmic (alguns minutos).
 
 ## Direito autoral
 

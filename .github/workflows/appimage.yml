@@ -14,13 +14,13 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Dependências de build
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libxkbcommon-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
 
       - name: Compilar
-        run: cargo build --release -p telinhas
+        run: cargo build --release -p telinhas -p telinhas-gui
 
       - name: Gerar AppImage
         env:
@@ -30,6 +30,7 @@ jobs:
           curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy
           ./linuxdeploy --appdir AppDir \
+            -e target/release/telinhas-gui \
             -e target/release/telinhas \
             -d packaging/telinhas.desktop \
             -i packaging/telinhas.png \

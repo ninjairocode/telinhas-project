@@ -1,6 +1,6 @@
 [workspace]
 resolver = "2"
-members = ["crates/telinhas-core", "crates/telinhas"]
+members = ["crates/telinhas-core", "crates/telinhas", "crates/telinhas-gui"]
 
 [workspace.package]
 version = "0.1.0"

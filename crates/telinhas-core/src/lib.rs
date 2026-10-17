@@ -10,6 +10,7 @@ pub mod protocol;
 pub mod transport;
 
 pub use error::{Error, Result};
+pub use hidapi;
 
 /// Interface comum a todas as telas suportadas.
 pub trait Screen {

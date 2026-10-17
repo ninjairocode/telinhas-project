@@ -2,7 +2,8 @@
 Type=Application
 Name=Telinhas
 Comment=Controle mini telas de PC no Linux
-Exec=telinhas
+Exec=telinhas-gui
 Icon=telinhas
 Categories=System;Utility;
-Terminal=true
+Terminal=false
+StartupWMClass=io.github.ninjairocode.Telinhas
