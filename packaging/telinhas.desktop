@@ -1,0 +1,8 @@
+[Desktop Entry]
+Type=Application
+Name=Telinhas
+Comment=Controle mini telas de PC no Linux
+Exec=telinhas
+Icon=telinhas
+Categories=System;Utility;
+Terminal=true

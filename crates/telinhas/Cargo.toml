@@ -1,0 +1,11 @@
+[package]
+name = "telinhas"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Controle mini telas de PC no Linux"
+
+[dependencies]
+telinhas-core = { path = "../telinhas-core" }
+hidapi = "2"
+clap = { version = "4", features = ["derive"] }

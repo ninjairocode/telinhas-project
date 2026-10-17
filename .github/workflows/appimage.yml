@@ -1,0 +1,41 @@
+name: AppImage
+
+on:
+  push:
+    branches: [main]
+    tags: ["v*"]
+  workflow_dispatch:
+
+jobs:
+  appimage:
+    # 22.04 mantém a glibc antiga, para o AppImage rodar em mais distros.
+    runs-on: ubuntu-22.04
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Dependências de build
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev pkg-config
+
+      - uses: dtolnay/rust-toolchain@stable
+      - uses: Swatinem/rust-cache@v2
+
+      - name: Compilar
+        run: cargo build --release -p telinhas
+
+      - name: Gerar AppImage
+        env:
+          APPIMAGE_EXTRACT_AND_RUN: "1"
+          OUTPUT: Telinhas-x86_64.AppImage
+        run: |
+          curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
+          chmod +x linuxdeploy
+          ./linuxdeploy --appdir AppDir \
+            -e target/release/telinhas \
+            -d packaging/telinhas.desktop \
+            -i packaging/telinhas.png \
+            --output appimage
+
+      - uses: actions/upload-artifact@v4
+        with:
+          name: Telinhas-AppImage
+          path: "*.AppImage"

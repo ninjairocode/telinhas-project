@@ -1,0 +1,10 @@
+[package]
+name = "telinhas-core"
+version.workspace = true
+edition.workspace = true
+license.workspace = true
+description = "Núcleo do Telinhas: transporte HID e drivers de mini telas"
+
+[dependencies]
+hidapi = "2"
+thiserror = "1"
