@@ -6,6 +6,12 @@ on:
     tags: ["v*"]
   workflow_dispatch:
 
+permissions:
+  contents: write # publicar a Release nas tags
+
+env:
+  APP_ID: io.github.ninjairocode.Telinhas
+
 jobs:
   appimage:
     # 22.04 mantém a glibc antiga, para o AppImage rodar em mais distros.
@@ -14,10 +20,19 @@ jobs:
       - uses: actions/checkout@v4
 
       - name: Dependências de build
-        run: sudo apt-get update && sudo apt-get install -y libudev-dev libxkbcommon-dev pkg-config
+        run: sudo apt-get update && sudo apt-get install -y libudev-dev libxkbcommon-dev libwayland-dev pkg-config
 
       - uses: dtolnay/rust-toolchain@stable
       - uses: Swatinem/rust-cache@v2
+
+      - name: Testes
+        run: cargo test -p telinhas-core
+
+      - name: Validar metadados
+        run: |
+          sudo apt-get install -y appstream desktop-file-utils
+          appstreamcli validate --no-net packaging/$APP_ID.metainfo.xml
+          desktop-file-validate packaging/$APP_ID.desktop
 
       - name: Compilar
         run: cargo build --release -p telinhas -p telinhas-gui
@@ -25,18 +40,36 @@ jobs:
       - name: Gerar AppImage
         env:
           APPIMAGE_EXTRACT_AND_RUN: "1"
-          OUTPUT: Telinhas-x86_64.AppImage
+          LDAI_OUTPUT: Telinhas-x86_64.AppImage
+          # Permite atualizar com AppImageUpdate a partir da última Release.
+          LDAI_UPDATE_INFORMATION: "gh-releases-zsync|ninjairocode|telinhas-project|latest|Telinhas-x86_64.AppImage.zsync"
+          # Metadados já validados acima, sem rede.
+          LDAI_NO_APPSTREAM: "1"
         run: |
           curl -fsSL -o linuxdeploy https://github.com/linuxdeploy/linuxdeploy/releases/download/continuous/linuxdeploy-x86_64.AppImage
           chmod +x linuxdeploy
+          # Esta versão do appimagetool procura o nome antigo, .appdata.xml.
+          install -Dm644 packaging/$APP_ID.metainfo.xml AppDir/usr/share/metainfo/$APP_ID.appdata.xml
+          cp -r packaging/icons AppDir/usr/share/
           ./linuxdeploy --appdir AppDir \
             -e target/release/telinhas-gui \
             -e target/release/telinhas \
-            -d packaging/telinhas.desktop \
-            -i packaging/telinhas.png \
+            -d packaging/$APP_ID.desktop \
+            -i packaging/icons/hicolor/256x256/apps/$APP_ID.png \
             --output appimage
 
       - uses: actions/upload-artifact@v4
         with:
           name: Telinhas-AppImage
-          path: "*.AppImage"
+          path: |
+            Telinhas-x86_64.AppImage
+            Telinhas-x86_64.AppImage.zsync
+
+      - name: Publicar Release
+        if: startsWith(github.ref, 'refs/tags/v')
+        uses: softprops/action-gh-release@v2
+        with:
+          files: |
+            Telinhas-x86_64.AppImage
+            Telinhas-x86_64.AppImage.zsync
+          generate_release_notes: true

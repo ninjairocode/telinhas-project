@@ -1,0 +1,95 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<component type="desktop-application">
+  <id>io.github.ninjairocode.Telinhas</id>
+  <metadata_license>CC0-1.0</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
+
+  <name>Telinhas</name>
+  <summary>Manage the mini screens of your PC</summary>
+  <summary xml:lang="pt-BR">Gerencie as mini telas do seu PC</summary>
+
+  <update_contact>ninjairocode@outlook.com</update_contact>
+
+  <developer id="io.github.ninjairocode">
+    <name>ninjairocode</name>
+  </developer>
+
+  <description>
+    <p>
+      Telinhas brings together, in one place, the tools to manage the small
+      screens found in PCs: AIO cooler displays, case panels and other mini
+      screens.
+    </p>
+    <p>
+      This is an early-stage project. For now it supports a single device,
+      the Thermaltake TH360 V3 Ultra ARGB Sync LCD (USB 264a:2348). Support for
+      more devices and features will grow with each update.
+    </p>
+    <p>Current features:</p>
+    <ul>
+      <li>Show an image on the screen, cropped to its native resolution</li>
+      <li>Adjust brightness and rotation</li>
+      <li>Detect when the screen is connected or disconnected</li>
+    </ul>
+    <p>
+      Planned: more device models and system information on the screen, such
+      as the CPU temperature.
+    </p>
+    <p>
+      Accessing the screen requires a udev rule on the host; the app shows the
+      command to install it.
+    </p>
+  </description>
+
+  <screenshots>
+    <screenshot type="default">
+      <caption>Screen status, image preview, brightness and rotation</caption>
+      <image>https://raw.githubusercontent.com/ninjairocode/telinhas-project/main/docs/screenshots/main-window.png</image>
+    </screenshot>
+  </screenshots>
+
+  <launchable type="desktop-id">io.github.ninjairocode.Telinhas.desktop</launchable>
+  <provides>
+    <binary>telinhas-gui</binary>
+    <binary>telinhas</binary>
+    <modalias>usb:v264Ap2348d*</modalias>
+  </provides>
+
+  <url type="homepage">https://github.com/ninjairocode/telinhas-project</url>
+  <url type="bugtracker">https://github.com/ninjairocode/telinhas-project/issues</url>
+  <url type="vcs-browser">https://github.com/ninjairocode/telinhas-project</url>
+
+  <categories>
+    <category>Settings</category>
+    <category>HardwareSettings</category>
+  </categories>
+  <keywords>
+    <keyword>lcd</keyword>
+    <keyword>screen</keyword>
+    <keyword>cooler</keyword>
+    <keyword>aio</keyword>
+    <keyword>thermaltake</keyword>
+  </keywords>
+
+  <requires>
+    <display_length compare="ge">420</display_length>
+  </requires>
+  <supports>
+    <control>pointing</control>
+    <control>keyboard</control>
+  </supports>
+
+  <content_rating type="oars-1.1" />
+
+  <releases>
+    <release version="0.1.0" date="2026-10-17">
+      <description>
+        <p>
+          First public release. Supports the Thermaltake TH360 V3 Ultra LCD:
+          show an image, adjust brightness and rotation. Graphical interface
+          for COSMIC and a command-line tool.
+        </p>
+      </description>
+    </release>
+  </releases>
+</component>

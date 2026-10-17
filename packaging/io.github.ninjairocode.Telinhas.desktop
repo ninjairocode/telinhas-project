@@ -1,0 +1,12 @@
+[Desktop Entry]
+Type=Application
+Name=Telinhas
+Comment=Manage the mini screens of your PC (AIO coolers, cases and more)
+Comment[pt_BR]=Gerencie as mini telas do seu PC (watercoolers, gabinetes e outros)
+Exec=telinhas-gui
+Icon=io.github.ninjairocode.Telinhas
+Categories=Settings;HardwareSettings;
+Keywords=lcd;screen;display;cooler;aio;thermaltake;
+Keywords[pt_BR]=lcd;tela;visor;watercooler;thermaltake;
+Terminal=false
+StartupWMClass=io.github.ninjairocode.Telinhas
