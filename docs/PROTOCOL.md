@@ -1,9 +1,50 @@
 # Protocolo da tela Thermaltake (264a:2348)
 
-Fonte: análise estática do instalador `TT LCD Screen_1.4.0.exe` (NSIS 3.04 com
-7z embutido; app Electron + Vue). Nada abaixo foi confirmado em hardware.
+## Confirmado em hardware (2026-10-17)
 
-## Confirmado (lido diretamente dos arquivos)
+A TH360 V3 Ultra fala o **protocolo BY**, o mesmo documentado publicamente para
+o painel 6" `264a:2347`
+([deniswsrosa/thermaltake-6inch-lcd-linux](https://github.com/deniswsrosa/thermaltake-6inch-lcd-linux)).
+Implementação própria em `crates/telinhas-core/src/protocol/by.rs`.
+
+- Quadro: `5A | tamanho u16 BE (texto + 5) | texto | soma8 | 5A`, um por
+  relatório de 1024 bytes (zeros depois do `5A` final). soma8 = soma dos bytes
+  do tamanho e do texto, mod 256. Entre os delimitadores, `5A` → `5B 01` e
+  `5B` → `5B 02`.
+- Texto no estilo HTTP, linhas com CRLF:
+  `POST conn 1` / `SeqNumber=112` / `ContentType=json` / `ContentLength=0` /
+  linha vazia / corpo JSON.
+- Resposta ao `conn` (`telinhas probe`): `1 200`, `AckNumber=113`,
+  `ContentType=json`, `ContentLength=222` e o corpo
+  `{"OS":"Linux","version":{"app":"V1.0.3","firmware":"V1.0.3","sdk":"V1.2.7","hardware":"V1.0"},"space":…,"brightness":100,"degree":0,"sn":"…","osdState":0,"mode":0,"logo":1,"timeout":5,"bootFinish":1}`.
+  O controlador roda Linux embarcado. `timeout` (s) deve ser o tempo sem
+  quadros até a tela voltar à própria tela.
+
+- `POST realtimeDisplay 1` com `{"enable": true}` responde `200`.
+- Quadros ao vivo (`telinhas show`): JPEG 720x720 em relatórios **sem** o
+  quadro `5A`, cada um `5C 03 FD | contador 0–59 | total u16 BE | índice u16 BE
+  | 01 | zeros até o byte 23 | 1000 bytes de JPEG` (última fatia completada com
+  zeros), sem pausa entre fatias e sem resposta. Testado com um JPEG vermelho
+  de 14 805 bytes (15 fatias) reenviado a cada 2 s: a tela ficou toda vermelha.
+  Limite de 0xC7FFF bytes por JPEG (do painel 6", não testado aqui).
+
+Ainda não testado aqui: `brightness` (`{"value": 0–100}`), `rotate`
+(`{"degree": N}`), taxa máxima de quadros.
+
+## Análise estática do instalador
+
+Fonte: `TT LCD Screen_1.4.0.exe` (NSIS 3.04 com 7z embutido; app Electron +
+Vue).
+
+O processo principal (`out/main/index.jsc`) contém os cabeçalhos `SeqNumber`,
+`AckNumber`, `ContentLength`, `ContentType`, `FileName`, `FileBlockId`,
+`FileSize`, `ContentRange`, `Counter`, `Option`; métodos `GET`, `POST`,
+`STATE`, `DELETE`; comandos `conn`, `realtimeDisplay`, `displayInSleep`,
+`brightness`, `power`, `config`, `sysinfoDisplay`, `fanLCDSet`,
+`waterBlockScreen`, `mediaDelete`, `recovery`, `factoryTest`, `transport`,
+`transported`. Não envie os quatro últimos (gravação/recuperação/firmware).
+
+## Lido diretamente dos arquivos
 
 - USB: VID `0x264a`, PID `0x2348`, "ThermalTake USB Device", USB 2.0.
 - Uma interface HID, endpoints de interrupção IN `0x81` e OUT `0x01`,
@@ -42,10 +83,10 @@ Fonte: análise estática do instalador `TT LCD Screen_1.4.0.exe` (NSIS 3.04 com
   camada de "arquivo" (metadados + dados) para enviar JPEG/vídeo.
 - Teto de ~1 MB/s pelo intervalo de 1 ms: algo como 15–30 quadros/s de JPEG.
 
-## O que falta e como obter
+## Se precisar de mais detalhes
 
-Falta o layout exato: tamanho do cabeçalho, códigos de tipo, checksum/CRC,
-numeração de ack, sequência dos pacotes de "arquivo". Dois caminhos:
+Para o que o protocolo BY público não cobrir (camada TLV do addon, envio de
+arquivos), dois caminhos:
 
 1. **Captura USB** do app oficial (VM Windows com repasse da tela + `usbmon` no
    host, filtrando o endpoint `0x01`). Ações isoladas: conectar, mudar brilho,

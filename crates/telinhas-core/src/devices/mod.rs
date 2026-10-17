@@ -15,7 +15,16 @@ pub struct DeviceInfo {
 /// Todos os modelos que o Telinhas conhece.
 pub const KNOWN_DEVICES: &[DeviceInfo] = &[thermaltake::TH360_V3_ULTRA];
 
-/// Modelos conhecidos que estão conectados agora.
+/// Relê a lista de dispositivos USB e devolve os modelos conhecidos
+/// conectados. O `HidApi` guarda a lista de quando foi criado; programas de
+/// longa duração (a interface gráfica) devem chamar isto periodicamente para
+/// perceber telas conectadas ou desconectadas.
+pub fn rescan(api: &mut HidApi) -> crate::Result<Vec<&'static DeviceInfo>> {
+    api.refresh_devices()?;
+    Ok(detect(api))
+}
+
+/// Modelos conhecidos na lista atual do `HidApi` (sem reler o USB).
 pub fn detect(api: &HidApi) -> Vec<&'static DeviceInfo> {
     KNOWN_DEVICES
         .iter()

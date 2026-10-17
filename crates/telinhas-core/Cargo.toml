@@ -7,4 +7,5 @@ description = "Núcleo do Telinhas: transporte HID e drivers de mini telas"
 
 [dependencies]
 hidapi = "2"
+image = { version = "0.25", default-features = false, features = ["jpeg", "png", "webp"] }
 thiserror = "1"

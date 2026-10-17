@@ -5,12 +5,14 @@
 
 pub mod devices;
 pub mod error;
+pub mod imaging;
+pub mod protocol;
 pub mod transport;
 
 pub use error::{Error, Result};
 
 /// Interface comum a todas as telas suportadas.
-pub trait Display {
+pub trait Screen {
     /// Informações estáticas do modelo (nome, resolução, VID/PID).
     fn info(&self) -> &devices::DeviceInfo;
 
