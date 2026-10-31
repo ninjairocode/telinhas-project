@@ -14,6 +14,9 @@ pub enum Error {
     #[error("image error: {0}")]
     Image(#[from] image::ImageError),
 
+    #[error("JPEG encoding error: {0}")]
+    Jpeg(#[from] jpeg_encoder::EncodingError),
+
     #[error("invalid frame: {0}")]
     BadFrame(&'static str),
 

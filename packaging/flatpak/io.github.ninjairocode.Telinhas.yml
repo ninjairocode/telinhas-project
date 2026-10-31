@@ -26,6 +26,8 @@ finish-args:
   # COSMIC theme and settings.
   - --talk-name=com.system76.CosmicSettingsDaemon
   - --filesystem=xdg-config/cosmic:ro
+  # "Start with the system" on desktops without the Background portal (COSMIC).
+  - --filesystem=xdg-config/autostart:create
 build-options:
   append-path: /usr/lib/sdk/rust-stable/bin
 modules:

@@ -326,7 +326,11 @@ impl cosmic::Application for App {
                     match config::set_autostart_portal(enable).await {
                         Ok(true) => Message::AutostartChanged(enable),
                         Ok(false) => Message::Error("start with the system was not allowed".into()),
-                        Err(e) => Message::Error(format!("start with the system: {e}")),
+                        // Sem portal Background (caso do COSMIC): grava o atalho direto.
+                        Err(_) => match config::set_autostart(enable) {
+                            Ok(()) => Message::AutostartChanged(enable),
+                            Err(e) => Message::Error(format!("start with the system: {e}")),
+                        },
                     }
                 });
             }

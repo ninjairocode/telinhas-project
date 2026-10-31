@@ -13,3 +13,11 @@ homepage = "https://github.com/ninjairocode/telinhas-project"
 [profile.release]
 lto = "thin"
 strip = true
+
+# Codificar/decodificar imagens sem otimização deixa testes e `cargo run`
+# lentos demais.
+[profile.dev.package.jpeg-encoder]
+opt-level = 3
+
+[profile.dev.package.zune-jpeg]
+opt-level = 3

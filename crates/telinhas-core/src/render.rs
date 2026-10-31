@@ -5,7 +5,6 @@
 use std::sync::OnceLock;
 
 use ab_glyph::{FontRef, PxScale};
-use image::codecs::jpeg::JpegEncoder;
 use image::{DynamicImage, ImageFormat, Rgba, RgbaImage};
 use imageproc::drawing::{draw_text_mut, text_size};
 use serde::{Deserialize, Serialize};
@@ -131,10 +130,7 @@ pub fn compose_jpeg(
 ) -> Result<Vec<u8>> {
     let mut img = image::load_from_memory_with_format(base, ImageFormat::Jpeg)?.to_rgba8();
     draw_overlay(&mut img, readings, position);
-    let mut out = Vec::new();
-    JpegEncoder::new_with_quality(&mut out, quality.clamp(1, 100))
-        .encode_image(&DynamicImage::ImageRgba8(img).to_rgb8())?;
-    Ok(out)
+    crate::imaging::encode_rgb(&DynamicImage::ImageRgba8(img).to_rgb8(), quality)
 }
 
 fn darken(img: &mut RgbaImage, top: u32, bottom: u32) {

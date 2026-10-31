@@ -6,7 +6,6 @@ use std::io::Cursor;
 use std::time::Duration;
 
 use image::codecs::gif::GifDecoder;
-use image::codecs::jpeg::JpegEncoder;
 use image::imageops::FilterType;
 use image::{AnimationDecoder, DynamicImage, ImageFormat};
 
@@ -117,9 +116,25 @@ fn prepare_animation(
 }
 
 fn encode(img: &DynamicImage, quality: u8) -> Result<Vec<u8>> {
-    let mut jpeg = Vec::new();
-    JpegEncoder::new_with_quality(&mut jpeg, quality).encode_image(&img.to_rgb8())?;
-    Ok(jpeg)
+    encode_rgb(&img.to_rgb8(), quality)
+}
+
+/// Codifica em JPEG com o crate `jpeg-encoder`, cerca de duas vezes mais
+/// rápido que o codificador do `image`; conta muito ao desenhar métricas sobre
+/// GIFs, quadro a quadro.
+pub(crate) fn encode_rgb(img: &image::RgbImage, quality: u8) -> Result<Vec<u8>> {
+    let too_big =
+        |_| Error::InvalidValue(format!("image too large: {}x{}", img.width(), img.height()));
+    let width = u16::try_from(img.width()).map_err(too_big)?;
+    let height = u16::try_from(img.height()).map_err(too_big)?;
+    let mut out = Vec::new();
+    jpeg_encoder::Encoder::new(&mut out, quality.clamp(1, 100)).encode(
+        img.as_raw(),
+        width,
+        height,
+        jpeg_encoder::ColorType::Rgb,
+    )?;
+    Ok(out)
 }
 
 /// Como [`prepare`], mas só o JPEG do primeiro quadro.
@@ -151,10 +166,10 @@ pub fn solid(width: u32, height: u32, rgb: [u8; 3], quality: u8) -> Result<Prepa
 
 /// JPEG de uma cor só; útil para testar a tela.
 pub fn solid_jpeg(width: u32, height: u32, rgb: [u8; 3], quality: u8) -> Result<Vec<u8>> {
-    let img = image::RgbImage::from_pixel(width, height, image::Rgb(rgb));
-    let mut out = Vec::new();
-    JpegEncoder::new_with_quality(&mut out, quality.clamp(1, 100)).encode_image(&img)?;
-    Ok(out)
+    encode_rgb(
+        &image::RgbImage::from_pixel(width, height, image::Rgb(rgb)),
+        quality,
+    )
 }
 
 #[cfg(test)]
