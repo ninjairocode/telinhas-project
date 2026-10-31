@@ -7,8 +7,11 @@ use std::time::{Duration, Instant};
 
 use cosmic::iced::futures::{self, SinkExt, Stream};
 use cosmic::iced::{stream, Subscription};
+use telinhas_core::devices::FrameFormat;
 use telinhas_core::devices::{Bus, DeviceInfo};
 use telinhas_core::imaging::PreparedFrame;
+use telinhas_core::render::{self, Position};
+use telinhas_core::sensors::{Metric, Reading, Sensors};
 use telinhas_core::{Capabilities, Error, Screen, ScreenStatus};
 
 /// Intervalo entre buscas pela tela quando ela não está conectada (ou
@@ -16,6 +19,51 @@ use telinhas_core::{Capabilities, Error, Screen, ScreenStatus};
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 /// Reenvio do quadro para telas que não pedem um intervalo próprio.
 const DEFAULT_RESEND: Duration = Duration::from_secs(2);
+/// A cada quanto tempo reler as métricas.
+const METRICS_INTERVAL: Duration = Duration::from_secs(1);
+
+/// Métricas escolhidas e a última leitura.
+struct Overlay {
+    sensors: Sensors,
+    metrics: Vec<Metric>,
+    position: Position,
+    readings: Vec<Reading>,
+    next_sample: Instant,
+}
+
+impl Overlay {
+    fn new() -> Self {
+        Self {
+            sensors: Sensors::new(),
+            metrics: Vec::new(),
+            position: Position::default(),
+            readings: Vec::new(),
+            next_sample: Instant::now(),
+        }
+    }
+
+    fn set(&mut self, metrics: Vec<Metric>, position: Position) {
+        self.metrics = metrics;
+        self.position = position;
+        if self.metrics.is_empty() {
+            self.readings.clear();
+        }
+        self.next_sample = Instant::now();
+    }
+
+    /// Relê as métricas se chegou a hora.
+    fn refresh(&mut self) {
+        if !self.metrics.is_empty() && Instant::now() >= self.next_sample {
+            self.readings = self.sensors.sample(&self.metrics);
+            self.next_sample = Instant::now() + METRICS_INTERVAL;
+        }
+    }
+
+    /// Próxima releitura, se houver métricas.
+    fn due(&self) -> Option<Instant> {
+        (!self.metrics.is_empty()).then_some(self.next_sample)
+    }
+}
 
 /// Pedidos da interface para a thread.
 #[derive(Debug, Clone)]
@@ -27,6 +75,8 @@ pub enum Command {
     Stop,
     SetBrightness(u8),
     SetRotation(u16),
+    /// Métricas desenhadas sobre os quadros (vazio: nenhuma) e onde.
+    SetOverlay(Vec<Metric>, Position),
 }
 
 /// Notícias da thread para a interface.
@@ -81,11 +131,12 @@ fn run(cmds: Receiver<Command>, ev: Events) {
     let mut bus = match Bus::new() {
         Ok(bus) => bus,
         Err(e) => {
-            let _ = ev.send(Event::Error(format!("não foi possível iniciar o HID: {e}")));
+            let _ = ev.send(Event::Error(format!("could not start HID: {e}")));
             return;
         }
     };
     let mut image: Option<Arc<Vec<PreparedFrame>>> = None;
+    let mut overlay = Overlay::new();
     let mut last_no_access = None;
 
     loop {
@@ -100,7 +151,14 @@ fn run(cmds: Receiver<Command>, ev: Events) {
             match bus.open(info) {
                 Ok(mut screen) => {
                     last_no_access = None;
-                    match session(screen.as_mut(), &mut bus, &cmds, &ev, &mut image) {
+                    let ctx = Session {
+                        bus: &mut bus,
+                        cmds: &cmds,
+                        ev: &ev,
+                        image: &mut image,
+                        overlay: &mut overlay,
+                    };
+                    match session(screen.as_mut(), ctx) {
                         End::Closed => return,
                         End::Lost(why) => {
                             let _ = ev.send(Event::Disconnected(why));
@@ -122,6 +180,7 @@ fn run(cmds: Receiver<Command>, ev: Events) {
             match cmds.recv_timeout(deadline.saturating_duration_since(Instant::now())) {
                 Ok(Command::Show(jpeg)) => image = Some(jpeg),
                 Ok(Command::Stop) => image = None,
+                Ok(Command::SetOverlay(m, p)) => overlay.set(m, p),
                 Ok(_) => {}
                 Err(RecvTimeoutError::Timeout) => break,
                 Err(RecvTimeoutError::Disconnected) => return,
@@ -130,14 +189,25 @@ fn run(cmds: Receiver<Command>, ev: Events) {
     }
 }
 
-fn session(
-    screen: &mut dyn Screen,
-    bus: &mut Bus,
-    cmds: &Receiver<Command>,
-    ev: &Events,
-    image: &mut Option<Arc<Vec<PreparedFrame>>>,
-) -> End {
+/// Estado que sobrevive às reconexões, emprestado a cada sessão.
+struct Session<'a> {
+    bus: &'a mut Bus,
+    cmds: &'a Receiver<Command>,
+    ev: &'a Events,
+    image: &'a mut Option<Arc<Vec<PreparedFrame>>>,
+    overlay: &'a mut Overlay,
+}
+
+fn session(screen: &mut dyn Screen, ctx: Session) -> End {
+    let Session {
+        bus,
+        cmds,
+        ev,
+        image,
+        overlay,
+    } = ctx;
     let info = screen.info();
+    let FrameFormat::Jpeg { quality } = info.frame;
     let resend = info.keepalive.unwrap_or(DEFAULT_RESEND);
     match screen.connect() {
         Ok(status) => {
@@ -154,11 +224,21 @@ fn session(
             if Instant::now() >= next_frame {
                 let frame = player.current(frames);
                 let started = Instant::now();
-                if let Err(e) = screen.show_frame(&frame.jpeg) {
+                overlay.refresh();
+                let sent = if overlay.readings.is_empty() {
+                    screen.show_frame(&frame.jpeg)
+                } else {
+                    render::compose_jpeg(&frame.jpeg, &overlay.readings, overlay.position, quality)
+                        .and_then(|jpeg| screen.show_frame(&jpeg))
+                };
+                if let Err(e) = sent {
                     return End::Lost(e.to_string());
                 }
                 player.sent(started.elapsed());
                 next_frame = player.next_send(frames, resend);
+                if let Some(due) = overlay.due() {
+                    next_frame = next_frame.min(due);
+                }
             }
         }
         let wait = if image.is_some() {
@@ -178,6 +258,11 @@ fn session(
                 *image = None;
                 Ok(())
             }
+            Ok(Command::SetOverlay(m, p)) => {
+                overlay.set(m, p);
+                next_frame = Instant::now();
+                Ok(())
+            }
             Ok(Command::SetBrightness(v)) => screen
                 .set_brightness(v)
                 .and_then(|()| report_status(screen, ev)),
@@ -188,7 +273,7 @@ fn session(
                 // Ocioso: confere se a tela continua ali.
                 match bus.rescan() {
                     Ok(found) if found.iter().any(|d| std::ptr::eq(*d, info)) => Ok(()),
-                    Ok(_) => return End::Lost("tela desconectada".into()),
+                    Ok(_) => return End::Lost("screen unplugged".into()),
                     Err(e) => Err(e),
                 }
             }
@@ -276,7 +361,7 @@ impl Player {
             let fps = f64::from(self.stats_frames) / elapsed.as_secs_f64();
             let avg = self.stats_busy / self.stats_frames;
             eprintln!(
-                "telinhas: {fps:.1} quadros/s; envio médio de {:.1} ms por quadro",
+                "telinhas: {fps:.1} frames/s; {:.1} ms average send time per frame",
                 avg.as_secs_f64() * 1000.0
             );
             self.stats_since = Instant::now();

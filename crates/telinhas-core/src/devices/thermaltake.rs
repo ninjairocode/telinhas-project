@@ -134,7 +134,9 @@ impl Screen for ThermaltakeLcd {
 
     fn set_brightness(&mut self, value: u8) -> Result<()> {
         if value > 100 {
-            return Err(Error::InvalidValue(format!("brilho {value} (use 0–100)")));
+            return Err(Error::InvalidValue(format!(
+                "brightness {value} (use 0–100)"
+            )));
         }
         self.command("brightness", &format!(r#"{{"value": {value}}}"#))?;
         Ok(())
@@ -143,7 +145,7 @@ impl Screen for ThermaltakeLcd {
     fn set_rotation(&mut self, degrees: u16) -> Result<()> {
         if !ROTATIONS.contains(&degrees) {
             return Err(Error::InvalidValue(format!(
-                "rotação {degrees} (use 0, 90, 180 ou 270)"
+                "rotation {degrees} (use 0, 90, 180 or 270)"
             )));
         }
         self.command("rotate", &format!(r#"{{"degree": {degrees}}}"#))?;

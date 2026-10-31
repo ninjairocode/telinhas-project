@@ -98,7 +98,7 @@ impl Bus {
 /// Regras udev que dão ao usuário da sessão acesso a todos os modelos
 /// conhecidos, sem root.
 pub fn udev_rules() -> String {
-    let mut out = String::from("# Telinhas: acesso sem root às mini telas suportadas.\n");
+    let mut out = String::from("# Telinhas: access to the supported mini screens without root.\n");
     for d in KNOWN_DEVICES {
         let _ = writeln!(out, "# {}", d.name);
         match d.connection {

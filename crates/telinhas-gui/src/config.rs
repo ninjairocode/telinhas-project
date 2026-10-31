@@ -4,6 +4,8 @@ use std::io;
 use std::path::{Path, PathBuf};
 
 use serde::{Deserialize, Serialize};
+use telinhas_core::render::Position;
+use telinhas_core::sensors::Metric;
 
 use crate::app::APP_ID;
 
@@ -22,6 +24,21 @@ pub struct Config {
     pub showing: bool,
     /// Iniciar em segundo plano com a sessão.
     pub autostart: bool,
+    /// Métricas desenhadas sobre a imagem.
+    #[serde(deserialize_with = "known_metrics")]
+    pub metrics: Vec<Metric>,
+    /// Onde desenhar as métricas.
+    pub metrics_position: Position,
+}
+
+/// Ignora métricas que deixaram de existir (por exemplo, "clock"), em vez de
+/// descartar a configuração inteira.
+fn known_metrics<'de, D: serde::Deserializer<'de>>(d: D) -> Result<Vec<Metric>, D::Error> {
+    let raw = Vec::<serde_json::Value>::deserialize(d)?;
+    Ok(raw
+        .into_iter()
+        .filter_map(|v| serde_json::from_value(v).ok())
+        .collect())
 }
 
 /// `$XDG_CONFIG_HOME/telinhas` (ou `~/.config/telinhas`).
@@ -102,7 +119,7 @@ pub fn set_autostart(enable: bool) -> io::Result<()> {
         &path,
         format!(
             "[Desktop Entry]\nType=Application\nName=Telinhas\n\
-             Comment=Mantém a imagem nas mini telas\n\
+             Comment=Keeps the image on your mini screens\n\
              Exec=\"{}\" --background\nIcon={APP_ID}\nTerminal=false\n\
              X-GNOME-Autostart-enabled=true\n",
             exe.display()

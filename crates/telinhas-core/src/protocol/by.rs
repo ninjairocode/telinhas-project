@@ -66,12 +66,12 @@ pub fn decode_frame(buf: &[u8]) -> Result<Vec<u8>> {
     let start = buf
         .iter()
         .position(|&b| b == FLAG)
-        .ok_or(Error::BadFrame("delimitador inicial ausente"))?;
+        .ok_or(Error::BadFrame("missing start delimiter"))?;
     let end = buf[start + 1..]
         .iter()
         .position(|&b| b == FLAG)
         .map(|i| start + 1 + i)
-        .ok_or(Error::BadFrame("delimitador final ausente"))?;
+        .ok_or(Error::BadFrame("missing end delimiter"))?;
 
     let mut raw = Vec::with_capacity(end - start);
     let mut it = buf[start + 1..end].iter();
@@ -80,7 +80,7 @@ pub fn decode_frame(buf: &[u8]) -> Result<Vec<u8>> {
             match it.next() {
                 Some(0x01) => FLAG,
                 Some(0x02) => ESC,
-                _ => return Err(Error::BadFrame("escape inválido")),
+                _ => return Err(Error::BadFrame("invalid escape")),
             }
         } else {
             b
@@ -88,14 +88,14 @@ pub fn decode_frame(buf: &[u8]) -> Result<Vec<u8>> {
     }
 
     if raw.len() < 3 {
-        return Err(Error::BadFrame("quadro curto demais"));
+        return Err(Error::BadFrame("frame too short"));
     }
     let (body, sum) = raw.split_at(raw.len() - 1);
     if body.iter().fold(0u8, |s, &b| s.wrapping_add(b)) != sum[0] {
-        return Err(Error::BadFrame("soma de verificação não confere"));
+        return Err(Error::BadFrame("checksum mismatch"));
     }
     if usize::from(u16::from_be_bytes([body[0], body[1]])) != raw.len() + 2 {
-        return Err(Error::BadFrame("campo de tamanho não confere"));
+        return Err(Error::BadFrame("length field mismatch"));
     }
     Ok(body[2..].to_vec())
 }
@@ -190,7 +190,7 @@ pub const FRAME_COUNTER_WRAP: u8 = 60;
 /// byte 23 | 1000 bytes de JPEG`, com a última fatia completada com zeros.
 pub fn image_slices(jpeg: &[u8], counter: u8) -> Result<Vec<[u8; REPORT_LEN]>> {
     if jpeg.is_empty() {
-        return Err(Error::BadFrame("JPEG vazio"));
+        return Err(Error::BadFrame("empty JPEG"));
     }
     if jpeg.len() > MAX_JPEG_LEN {
         return Err(Error::PayloadTooLarge {

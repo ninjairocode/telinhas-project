@@ -34,13 +34,13 @@ fn run_cli(args: &[OsString]) -> i32 {
         .and_then(|exe| Some(exe.parent()?.join("telinhas")))
         .filter(|p| p.exists());
     let Some(cli) = cli else {
-        eprintln!("telinhas-gui não aceita argumentos; use o comando `telinhas`.");
+        eprintln!("telinhas-gui takes no arguments; use the `telinhas` command.");
         return 2;
     };
     match std::process::Command::new(&cli).args(args).status() {
         Ok(status) => status.code().unwrap_or(1),
         Err(e) => {
-            eprintln!("não foi possível executar {}: {e}", cli.display());
+            eprintln!("could not run {}: {e}", cli.display());
             1
         }
     }

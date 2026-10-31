@@ -60,7 +60,7 @@ pub fn prepare(input: &[u8], width: u32, height: u32, quality: u8) -> Result<Pre
             .collect::<std::result::Result<Vec<_>, _>>()?;
         if frames.len() > MAX_FRAMES {
             return Err(Error::InvalidValue(format!(
-                "GIF com mais de {MAX_FRAMES} quadros"
+                "GIF with more than {MAX_FRAMES} frames"
             )));
         }
         if frames.len() > 1 {
@@ -128,6 +128,25 @@ pub fn prepare_jpeg(input: &[u8], width: u32, height: u32, quality: u8) -> Resul
         .frames
         .swap_remove(0)
         .jpeg)
+}
+
+/// Fundo de uma cor só, como [`Prepared`] (por exemplo, atrás das métricas
+/// quando não há imagem escolhida).
+pub fn solid(width: u32, height: u32, rgb: [u8; 3], quality: u8) -> Result<Prepared> {
+    let img =
+        image::RgbaImage::from_pixel(width, height, image::Rgba([rgb[0], rgb[1], rgb[2], 255]));
+    Ok(Prepared {
+        frames: vec![PreparedFrame {
+            jpeg: encode(
+                &DynamicImage::ImageRgba8(img.clone()),
+                quality.clamp(1, 100),
+            )?,
+            delay: None,
+        }],
+        rgba: img.into_raw(),
+        width,
+        height,
+    })
 }
 
 /// JPEG de uma cor só; útil para testar a tela.

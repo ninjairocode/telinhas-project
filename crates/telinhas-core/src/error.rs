@@ -2,34 +2,34 @@ use thiserror::Error;
 
 #[derive(Debug, Error)]
 pub enum Error {
-    #[error("erro de HID: {0}")]
+    #[error("HID error: {0}")]
     Hid(#[from] hidapi::HidError),
 
-    #[error("dispositivo {vid:04x}:{pid:04x} não encontrado")]
+    #[error("device {vid:04x}:{pid:04x} not found")]
     NotFound { vid: u16, pid: u16 },
 
-    #[error("{got} bytes excedem o limite de {max} bytes")]
+    #[error("{got} bytes exceed the {max}-byte limit")]
     PayloadTooLarge { got: usize, max: usize },
 
-    #[error("erro de imagem: {0}")]
+    #[error("image error: {0}")]
     Image(#[from] image::ImageError),
 
-    #[error("quadro inválido: {0}")]
+    #[error("invalid frame: {0}")]
     BadFrame(&'static str),
 
-    #[error("resposta inesperada do dispositivo: {0:?}")]
+    #[error("unexpected reply from the device: {0:?}")]
     BadResponse(String),
 
-    #[error("valor inválido: {0}")]
+    #[error("invalid value: {0}")]
     InvalidValue(String),
 
-    #[error("nenhuma tela conhecida encontrada")]
+    #[error("no supported screen found")]
     NoDevice,
 
-    #[error("esta tela não suporta {0}")]
+    #[error("this screen does not support {0}")]
     Unsupported(&'static str),
 
-    #[error("sem resposta do dispositivo ao comando `{0}`")]
+    #[error("no reply from the device to `{0}`")]
     NoResponse(String),
 }
 

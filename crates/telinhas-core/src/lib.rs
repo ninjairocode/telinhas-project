@@ -8,6 +8,8 @@ pub mod devices;
 pub mod error;
 pub mod imaging;
 pub mod protocol;
+pub mod render;
+pub mod sensors;
 pub mod transport;
 
 pub use error::{Error, Result};
@@ -48,11 +50,11 @@ pub trait Screen: Send {
 
     /// Brilho de 0 a 100.
     fn set_brightness(&mut self, _value: u8) -> Result<()> {
-        Err(Error::Unsupported("brilho"))
+        Err(Error::Unsupported("brightness"))
     }
 
     /// Rotação em graus, um dos valores de [`Capabilities::rotations`].
     fn set_rotation(&mut self, _degrees: u16) -> Result<()> {
-        Err(Error::Unsupported("rotação"))
+        Err(Error::Unsupported("rotation"))
     }
 }

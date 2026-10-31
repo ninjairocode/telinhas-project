@@ -1,6 +1,7 @@
 use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
+use std::time::Duration;
 
 use cosmic::app::CosmicFlags;
 use cosmic::dialog::file_chooser::{self, FileFilter};
@@ -8,7 +9,9 @@ use cosmic::iced::{window, Alignment, Length, Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, image::Handle, settings};
 use telinhas_core::devices::{self, DeviceInfo, KNOWN_DEVICES};
-use telinhas_core::{imaging, Capabilities, ScreenStatus};
+use telinhas_core::render::Position;
+use telinhas_core::sensors::{Metric, Reading, Sensors};
+use telinhas_core::{imaging, render, Capabilities, ScreenStatus};
 
 use crate::config::{self, Config};
 use crate::worker::{self, Command, Event};
@@ -17,6 +20,10 @@ pub const APP_ID: &str = "io.github.ninjairocode.Telinhas";
 const PREVIEW_SIZE: f32 = 360.0;
 const WINDOW_SIZE: Size = Size::new(560.0, 820.0);
 const WINDOW_MIN: Size = Size::new(420.0, 560.0);
+/// Fundo atrás das métricas quando nenhuma imagem foi escolhida.
+const SOLID_BACKGROUND: [u8; 3] = [16, 24, 48];
+/// Rótulos do seletor de posição, na ordem de `Position::ALL`.
+const POSITION_LABELS: [&str; 3] = ["Top", "Middle", "Bottom"];
 
 /// Flags de inicialização; exigidas pela instância única do libcosmic.
 #[derive(Debug, Clone, Default)]
@@ -39,10 +46,25 @@ enum Device {
     },
 }
 
+/// O que vai para a tela: quadros prontos e o primeiro em RGBA, base da prévia.
 struct Picture {
     name: String,
-    preview: Handle,
+    rgba: Vec<u8>,
+    width: u32,
+    height: u32,
     frames: Arc<Vec<imaging::PreparedFrame>>,
+}
+
+impl Picture {
+    fn new(name: String, prepared: &imaging::Prepared) -> Self {
+        Self {
+            name,
+            rgba: prepared.rgba.clone(),
+            width: prepared.width,
+            height: prepared.height,
+            frames: Arc::new(prepared.frames.clone()),
+        }
+    }
 }
 
 pub struct App {
@@ -50,6 +72,13 @@ pub struct App {
     cmds: Option<Sender<Command>>,
     device: Device,
     picture: Option<Picture>,
+    /// Fundo sólido, usado quando só há métricas.
+    solid: Option<Picture>,
+    /// Prévia com as métricas desenhadas.
+    preview: Option<Handle>,
+    sensors: Sensors,
+    available: Vec<Metric>,
+    readings: Vec<Reading>,
     loading: bool,
     showing: bool,
     /// O quadro atual já foi entregue ao worker.
@@ -74,6 +103,10 @@ pub enum Message {
         source: Option<(PathBuf, Arc<Vec<u8>>)>,
     },
     ToggleShow,
+    ToggleMetric(Metric, bool),
+    MetricsPosition(usize),
+    /// Relê as métricas para a prévia.
+    Tick,
     ToggleAutostart(bool),
     WindowClosed(window::Id),
     Quit,
@@ -102,11 +135,28 @@ impl cosmic::Application for App {
 
     fn init(core: cosmic::Core, _flags: Flags) -> (Self, Task<cosmic::Action<Message>>) {
         let config = Config::load();
+        let info = &KNOWN_DEVICES[0];
+        let solid = imaging::solid(
+            info.width,
+            info.height,
+            SOLID_BACKGROUND,
+            jpeg_quality(info),
+        )
+        .ok()
+        .map(|p| Picture::new(String::new(), &p));
+        let mut sensors = Sensors::new();
+        let available = sensors.available();
+        let readings = sensors.sample(&config.metrics);
         let mut app = App {
             core,
             cmds: None,
             device: Device::Searching,
             picture: None,
+            solid,
+            preview: None,
+            sensors,
+            available,
+            readings,
             loading: false,
             showing: config.showing,
             sent: false,
@@ -123,13 +173,14 @@ impl cosmic::Application for App {
             let name = app.config.background_name.clone().unwrap_or_default();
             tasks.push(app.load(path, name, false));
         } else {
-            app.showing = false;
+            app.showing &= app.shown().is_some();
         }
+        app.refresh_preview();
         (app, Task::batch(tasks))
     }
 
     fn header_end(&self) -> Vec<Element<'_, Message>> {
-        vec![widget::button::text("Sair").on_press(Message::Quit).into()]
+        vec![widget::button::text("Quit").on_press(Message::Quit).into()]
     }
 
     fn on_close_requested(&self, id: window::Id) -> Option<Message> {
@@ -164,7 +215,12 @@ impl cosmic::Application for App {
     }
 
     fn subscription(&self) -> Subscription<Message> {
-        worker::subscription().map(Message::Worker)
+        let mut subs = vec![worker::subscription().map(Message::Worker)];
+        // Prévia ao vivo só com a janela aberta (o worker cuida da tela).
+        if !self.config.metrics.is_empty() && self.core.main_window_id().is_some() {
+            subs.push(cosmic::iced::time::every(Duration::from_secs(1)).map(|_| Message::Tick));
+        }
+        Subscription::batch(subs)
     }
 
     fn update(&mut self, message: Message) -> Task<cosmic::Action<Message>> {
@@ -172,24 +228,22 @@ impl cosmic::Application for App {
             Message::Worker(event) => self.on_worker(event),
             Message::PickImage => {
                 return cosmic::task::future(async {
-                    let mut filter = FileFilter::new("Imagens");
+                    let mut filter = FileFilter::new("Images");
                     for ext in [
                         "jpg", "jpeg", "png", "webp", "gif", "JPG", "JPEG", "PNG", "WEBP", "GIF",
                     ] {
                         filter = filter.glob(&format!("*.{ext}"));
                     }
                     let dialog = file_chooser::open::Dialog::new()
-                        .title("Escolher imagem")
+                        .title("Choose an image")
                         .filter(filter);
                     match dialog.open_file().await {
                         Ok(resp) => match resp.url().to_file_path() {
                             Ok(path) => Message::Picked(path),
-                            Err(()) => {
-                                Message::Error(format!("não é um arquivo local: {}", resp.url()))
-                            }
+                            Err(()) => Message::Error(format!("not a local file: {}", resp.url())),
                         },
                         Err(file_chooser::Error::Cancelled) => Message::PickCancelled,
-                        Err(e) => Message::Error(format!("seletor de arquivos: {e}")),
+                        Err(e) => Message::Error(format!("file chooser: {e}")),
                     }
                 });
             }
@@ -209,41 +263,69 @@ impl cosmic::Application for App {
                 self.loading = false;
                 if let Some((path, bytes)) = source {
                     if let Err(e) = self.config.store_background(&bytes, &path) {
-                        self.error = Some(format!("não foi possível guardar a imagem: {e}"));
+                        self.error = Some(format!("could not store the image: {e}"));
                     }
                     self.save_config();
                 }
                 let name = if prepared.is_animated() {
-                    format!("{name} (animação, {} quadros)", prepared.frames.len())
+                    format!("{name} (animated, {} frames)", prepared.frames.len())
                 } else {
                     name
                 };
-                self.picture = Some(Picture {
-                    name,
-                    preview: Handle::from_rgba(
-                        prepared.width,
-                        prepared.height,
-                        prepared.rgba.clone(),
-                    ),
-                    frames: Arc::new(prepared.frames.clone()),
-                });
+                self.picture = Some(Picture::new(name, &prepared));
+                self.refresh_preview();
                 // Imagem nova (ou restaurada): entrega ao worker se estiver mostrando.
                 self.sent = false;
                 self.sync_worker();
             }
             Message::ToggleShow => {
-                self.showing = !self.showing && self.picture.is_some();
+                self.showing = !self.showing && self.shown().is_some();
                 self.sent = false;
                 self.sync_worker();
                 self.config.showing = self.showing;
                 self.save_config();
+            }
+            Message::ToggleMetric(metric, on) => {
+                let mut metrics = std::mem::take(&mut self.config.metrics);
+                metrics.retain(|m| *m != metric);
+                if on {
+                    metrics.push(metric);
+                }
+                // Mantém a ordem de Metric::ALL, independente da ordem dos cliques.
+                self.config.metrics = Metric::ALL
+                    .into_iter()
+                    .filter(|m| metrics.contains(m))
+                    .collect();
+                self.send_overlay();
+                // Sem imagem, o fundo sólido aparece ou some junto com as métricas.
+                if self.picture.is_none() {
+                    self.showing &= self.shown().is_some();
+                    self.config.showing = self.showing;
+                    self.sent = false;
+                    self.sync_worker();
+                }
+                self.save_config();
+                self.readings = self.sensors.sample(&self.config.metrics);
+                self.refresh_preview();
+            }
+            Message::MetricsPosition(i) => {
+                if let Some(&p) = Position::ALL.get(i) {
+                    self.config.metrics_position = p;
+                    self.send_overlay();
+                    self.save_config();
+                    self.refresh_preview();
+                }
+            }
+            Message::Tick => {
+                self.readings = self.sensors.sample(&self.config.metrics);
+                self.refresh_preview();
             }
             Message::ToggleAutostart(enable) => match config::set_autostart(enable) {
                 Ok(()) => {
                     self.config.autostart = enable;
                     self.save_config();
                 }
-                Err(e) => self.error = Some(format!("início automático: {e}")),
+                Err(e) => self.error = Some(format!("start with the system: {e}")),
             },
             Message::WindowClosed(id) => {
                 if self.core.main_window_id() == Some(id) {
@@ -286,31 +368,31 @@ impl cosmic::Application for App {
                     .spacing(spacing.space_s)
                     .align_y(Alignment::Center)
                     .push(widget::text::body(e.as_str()).width(Length::Fill))
-                    .push(widget::button::text("Fechar").on_press(Message::DismissError)),
+                    .push(widget::button::text("Dismiss").on_press(Message::DismissError)),
             );
         }
 
-        let preview: Element<_> = match &self.picture {
-            Some(p) => widget::image(p.preview.clone())
+        let preview: Element<_> = match &self.preview {
+            Some(p) => widget::image(p.clone())
                 .width(PREVIEW_SIZE)
                 .height(PREVIEW_SIZE)
                 .into(),
             None => widget::container(widget::text::body(if self.loading {
-                "Preparando…"
+                "Preparing…"
             } else {
-                "Nenhuma imagem escolhida"
+                "No image selected"
             }))
             .center(PREVIEW_SIZE)
             .class(cosmic::theme::Container::Card)
             .into(),
         };
         let show_label = if self.showing {
-            "Parar"
+            "Stop"
         } else {
-            "Mostrar na tela"
+            "Show on screen"
         };
         let image_section = settings::section()
-            .title("Imagem")
+            .title("Image")
             .add(
                 widget::container(preview)
                     .width(Length::Fill)
@@ -320,24 +402,47 @@ impl cosmic::Application for App {
                 settings::item::builder(
                     self.picture
                         .as_ref()
-                        .map_or("Imagem ou GIF, recortada para a tela", |p| p.name.as_str()),
+                        .map_or("Image or GIF, cropped to the screen", |p| p.name.as_str()),
                 )
                 .control(
                     widget::row::with_capacity(2)
                         .spacing(spacing.space_xs)
                         .push(
-                            widget::button::standard("Escolher imagem…")
+                            widget::button::standard("Choose image…")
                                 .on_press_maybe((!self.loading).then_some(Message::PickImage)),
                         )
                         .push(
                             widget::button::suggested(show_label).on_press_maybe(
-                                (connected && (self.showing || self.picture.is_some()))
+                                (connected && (self.showing || self.shown().is_some()))
                                     .then_some(Message::ToggleShow),
                             ),
                         ),
                 ),
             );
         content = content.push(image_section);
+
+        let mut metrics = settings::section().title("Metrics on screen");
+        for &m in &self.available {
+            metrics = metrics.add(
+                settings::item::builder(m.description())
+                    .checkbox(self.config.metrics.contains(&m), move |on| {
+                        Message::ToggleMetric(m, on)
+                    }),
+            );
+        }
+        if !self.config.metrics.is_empty() {
+            let selected = Position::ALL
+                .iter()
+                .position(|p| *p == self.config.metrics_position);
+            metrics = metrics.add(
+                settings::item::builder("Position").control(widget::dropdown(
+                    &POSITION_LABELS,
+                    selected,
+                    Message::MetricsPosition,
+                )),
+            );
+        }
+        content = content.push(metrics);
 
         if let Device::Connected {
             caps,
@@ -346,10 +451,10 @@ impl cosmic::Application for App {
             ..
         } = &self.device
         {
-            let mut adjust = settings::section().title("Ajustes");
+            let mut adjust = settings::section().title("Adjustments");
             if caps.brightness {
                 adjust = adjust.add(
-                    settings::item::builder(format!("Brilho: {}%", self.brightness)).control(
+                    settings::item::builder(format!("Brightness: {}%", self.brightness)).control(
                         widget::slider(0..=100, self.brightness, Message::BrightnessDrag)
                             .on_release(Message::BrightnessRelease)
                             .width(220),
@@ -360,11 +465,13 @@ impl cosmic::Application for App {
                 let selected = status
                     .rotation
                     .and_then(|r| caps.rotations.iter().position(|&d| d == r));
-                adjust = adjust.add(settings::item::builder("Rotação").control(widget::dropdown(
-                    rotation_labels.as_slice(),
-                    selected,
-                    Message::Rotation,
-                )));
+                adjust = adjust.add(
+                    settings::item::builder("Rotation").control(widget::dropdown(
+                        rotation_labels.as_slice(),
+                        selected,
+                        Message::Rotation,
+                    )),
+                );
             }
             if caps.brightness || !caps.rotations.is_empty() {
                 content = content.push(adjust);
@@ -373,15 +480,15 @@ impl cosmic::Application for App {
 
         content = content.push(
             settings::section()
-                .title("Segundo plano")
+                .title("Background")
                 .add(
-                    settings::item::builder("Iniciar com o sistema")
-                        .description("Restaura a imagem na tela ao entrar na sessão")
+                    settings::item::builder("Start with the system")
+                        .description("Restores the image on the screen when you log in")
                         .toggler(self.config.autostart, Message::ToggleAutostart),
                 )
                 .add(widget::text::caption(
-                    "Fechar esta janela não para a tela: o Telinhas continua rodando. \
-                     Abra-o pelo menu para ver a janela de novo; use \"Sair\" para encerrar.",
+                    "Closing this window does not stop the screen: Telinhas keeps running. \
+                     Open it from the menu to see the window again; use \"Quit\" to exit.",
                 )),
         );
 
@@ -399,7 +506,7 @@ impl App {
     fn send(&mut self, cmd: Command) {
         if let Some(tx) = &self.cmds {
             if tx.send(cmd).is_err() {
-                self.error = Some("a thread do dispositivo parou".into());
+                self.error = Some("the device thread stopped".into());
             }
         }
     }
@@ -433,12 +540,40 @@ impl App {
         })
     }
 
+    /// O que iria para a tela: a imagem escolhida ou, só com métricas, o
+    /// fundo sólido.
+    fn shown(&self) -> Option<&Picture> {
+        self.picture.as_ref().or(self
+            .solid
+            .as_ref()
+            .filter(|_| !self.config.metrics.is_empty()))
+    }
+
+    /// Recompõe a prévia com as leituras atuais.
+    fn refresh_preview(&mut self) {
+        self.preview = self.shown().map(|p| {
+            let rgba = render::overlay_rgba(
+                p.rgba.clone(),
+                p.width,
+                p.height,
+                &self.readings,
+                self.config.metrics_position,
+            );
+            Handle::from_rgba(p.width, p.height, rgba)
+        });
+    }
+
+    fn send_overlay(&mut self) {
+        let cmd = Command::SetOverlay(self.config.metrics.clone(), self.config.metrics_position);
+        self.send(cmd);
+    }
+
     /// Entrega ao worker o que a interface quer na tela (uma vez por mudança).
     fn sync_worker(&mut self) {
         if self.sent || self.cmds.is_none() {
             return;
         }
-        let cmd = match (&self.picture, self.showing) {
+        let cmd = match (self.shown(), self.showing) {
             (Some(p), true) => Command::Show(p.frames.clone()),
             _ => Command::Stop,
         };
@@ -448,7 +583,7 @@ impl App {
 
     fn save_config(&mut self) {
         if let Err(e) = self.config.save() {
-            self.error = Some(format!("não foi possível salvar a configuração: {e}"));
+            self.error = Some(format!("could not save the settings: {e}"));
         }
     }
 
@@ -463,6 +598,7 @@ impl App {
         match event {
             Event::Ready(tx) => {
                 self.cmds = Some(tx);
+                self.send_overlay();
                 self.sync_worker();
             }
             Event::Connected { info, caps, status } => {
@@ -484,36 +620,35 @@ impl App {
             Event::NoAccess(why) => self.device = Device::NoAccess(why),
             Event::Disconnected(why) => {
                 self.device = Device::Searching;
-                self.error = Some(format!("Conexão perdida: {why}"));
+                self.error = Some(format!("Connection lost: {why}"));
             }
             Event::Error(e) => self.error = Some(e),
         }
     }
 
     fn device_section(&self) -> Element<'_, Message> {
-        let section = settings::section().title("Tela");
+        let section = settings::section().title("Screen");
         match &self.device {
             Device::Searching => section
                 .add(
-                    settings::item::builder("Procurando a tela…")
-                        .control(widget::text::caption("Conecte o cabo USB do visor")),
+                    settings::item::builder("Looking for the screen…")
+                        .control(widget::text::caption("Plug in the screen's USB cable")),
                 )
                 .into(),
             Device::NoAccess(why) => section
                 .add(
-                    settings::item::builder("Sem permissão para acessar a tela").control(
-                        widget::button::standard("Copiar comando")
-                            .on_press(Message::CopyUdevCommand),
+                    settings::item::builder("No permission to access the screen").control(
+                        widget::button::standard("Copy command").on_press(Message::CopyUdevCommand),
                     ),
                 )
                 .add(widget::text::body(format!(
-                    "Rode no terminal o comando copiado (instala a regra udev) e reconecte o \
-                     USB.\nDetalhe: {why}"
+                    "Run the copied command in a terminal (it installs the udev rule), then \
+                     plug the USB cable back in.\nDetails: {why}"
                 )))
                 .into(),
             Device::Connected { info, status, .. } => {
                 let mut section = section.add(
-                    settings::item::builder(info.name).control(widget::text::body("Conectada")),
+                    settings::item::builder(info.name).control(widget::text::body("Connected")),
                 );
                 if let Some(fw) = &status.firmware {
                     section = section.add(
