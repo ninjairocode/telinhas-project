@@ -39,7 +39,7 @@ enum Cmd {
     },
     /// Mostra uma imagem (ou uma cor sólida) na tela por alguns segundos
     Show {
-        /// Imagem (JPEG, PNG ou WebP); recortada e redimensionada para a tela
+        /// Imagem (JPEG, PNG, WebP ou GIF animado); recortada para a tela
         #[arg(required_unless_present = "color", conflicts_with = "color")]
         input: Option<PathBuf>,
         /// Cor sólida em hexadecimal, por exemplo ff0000
@@ -206,19 +206,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             let mut screen = if dry_run { None } else { Some(open_screen()?) };
             let info = screen.as_ref().map_or(&KNOWN_DEVICES[0], |s| s.info());
             let FrameFormat::Jpeg { quality } = info.frame;
-            let frame = match (&input, color) {
+            let frames = match (&input, color) {
                 (Some(path), _) => {
-                    imaging::prepare_jpeg(&std::fs::read(path)?, info.width, info.height, quality)?
+                    imaging::prepare(&std::fs::read(path)?, info.width, info.height, quality)?
+                        .frames
                 }
-                (None, Some(rgb)) => imaging::solid_jpeg(info.width, info.height, rgb, quality)?,
+                (None, Some(rgb)) => vec![imaging::PreparedFrame {
+                    jpeg: imaging::solid_jpeg(info.width, info.height, rgb, quality)?,
+                    delay: None,
+                }],
                 (None, None) => unreachable!("clap exige imagem ou --color"),
             };
+            let total: usize = frames.iter().map(|f| f.jpeg.len()).sum();
             println!(
-                "Quadro JPEG {}x{} para {}: {} bytes",
+                "{} quadro(s) JPEG {}x{} para {}: {} bytes no total",
+                frames.len(),
                 info.width,
                 info.height,
                 info.name,
-                frame.len()
+                total
             );
             let Some(screen) = screen.as_mut() else {
                 return Ok(());
@@ -228,14 +234,25 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 .map(Duration::from_millis)
                 .or(info.keepalive)
                 .unwrap_or(Duration::from_secs(2));
-            let end = Instant::now() + Duration::from_secs(seconds);
-            let mut n = 0u32;
-            while Instant::now() < end {
-                screen.show_frame(&frame)?;
+            let start = Instant::now();
+            let end = start + Duration::from_secs(seconds);
+            let (mut n, mut busy) = (0u32, Duration::ZERO);
+            for frame in frames.iter().cycle() {
+                if Instant::now() >= end {
+                    break;
+                }
+                let t = Instant::now();
+                screen.show_frame(&frame.jpeg)?;
+                busy += t.elapsed();
                 n += 1;
-                println!("Quadro #{n} enviado.");
-                std::thread::sleep(interval);
+                std::thread::sleep(frame.delay.unwrap_or(interval).saturating_sub(t.elapsed()));
             }
+            let secs = start.elapsed().as_secs_f64();
+            println!(
+                "{n} quadros em {secs:.1} s ({:.1} quadros/s; envio médio de {:.1} ms)",
+                f64::from(n) / secs,
+                busy.as_secs_f64() * 1000.0 / f64::from(n.max(1))
+            );
             println!("Pronto; a tela volta à própria imagem após o timeout dela.");
         }
         Cmd::Set {

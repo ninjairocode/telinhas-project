@@ -8,6 +8,7 @@ use std::time::{Duration, Instant};
 use cosmic::iced::futures::{self, SinkExt, Stream};
 use cosmic::iced::{stream, Subscription};
 use telinhas_core::devices::{Bus, DeviceInfo};
+use telinhas_core::imaging::PreparedFrame;
 use telinhas_core::{Capabilities, Error, Screen, ScreenStatus};
 
 /// Intervalo entre buscas pela tela quando ela não está conectada (ou
@@ -19,8 +20,9 @@ const DEFAULT_RESEND: Duration = Duration::from_secs(2);
 /// Pedidos da interface para a thread.
 #[derive(Debug, Clone)]
 pub enum Command {
-    /// Mostra este JPEG (já no tamanho da tela) até `Stop`.
-    Show(Arc<Vec<u8>>),
+    /// Mostra estes quadros (já no formato da tela) até `Stop`; com mais de
+    /// um quadro, toca em loop respeitando o atraso de cada um.
+    Show(Arc<Vec<PreparedFrame>>),
     /// Para de enviar quadros; a tela volta à própria imagem sozinha.
     Stop,
     SetBrightness(u8),
@@ -83,7 +85,7 @@ fn run(cmds: Receiver<Command>, ev: Events) {
             return;
         }
     };
-    let mut image: Option<Arc<Vec<u8>>> = None;
+    let mut image: Option<Arc<Vec<PreparedFrame>>> = None;
     let mut last_no_access = None;
 
     loop {
@@ -133,7 +135,7 @@ fn session(
     bus: &mut Bus,
     cmds: &Receiver<Command>,
     ev: &Events,
-    image: &mut Option<Arc<Vec<u8>>>,
+    image: &mut Option<Arc<Vec<PreparedFrame>>>,
 ) -> End {
     let info = screen.info();
     let resend = info.keepalive.unwrap_or(DEFAULT_RESEND);
@@ -145,14 +147,18 @@ fn session(
         Err(e) => return End::Lost(e.to_string()),
     }
 
+    let mut player = Player::default();
     let mut next_frame = Instant::now();
     loop {
-        if let Some(jpeg) = image.as_deref() {
+        if let Some(frames) = image.as_deref() {
             if Instant::now() >= next_frame {
-                if let Err(e) = screen.show_frame(jpeg) {
+                let frame = player.current(frames);
+                let started = Instant::now();
+                if let Err(e) = screen.show_frame(&frame.jpeg) {
                     return End::Lost(e.to_string());
                 }
-                next_frame = Instant::now() + resend;
+                player.sent(started.elapsed());
+                next_frame = player.next_send(frames, resend);
             }
         }
         let wait = if image.is_some() {
@@ -162,8 +168,9 @@ fn session(
         };
 
         let result = match cmds.recv_timeout(wait) {
-            Ok(Command::Show(jpeg)) => {
-                *image = Some(jpeg);
+            Ok(Command::Show(frames)) => {
+                *image = Some(frames);
+                player = Player::default();
                 next_frame = Instant::now();
                 Ok(())
             }
@@ -205,4 +212,76 @@ fn report_status(screen: &mut dyn Screen, ev: &Events) -> telinhas_core::Result<
     let status = screen.connect()?;
     let _ = ev.send(Event::StatusChanged(status));
     Ok(())
+}
+
+/// Avança os quadros de uma animação e mede a taxa real de envio.
+struct Player {
+    index: usize,
+    /// Quando trocar para o próximo quadro (`None`: ainda não mostrou nenhum).
+    advance_at: Option<Instant>,
+    stats_since: Instant,
+    stats_frames: u32,
+    stats_busy: Duration,
+}
+
+impl Default for Player {
+    fn default() -> Self {
+        Self {
+            index: 0,
+            advance_at: None,
+            stats_since: Instant::now(),
+            stats_frames: 0,
+            stats_busy: Duration::ZERO,
+        }
+    }
+}
+
+/// A cada quanto tempo registrar a taxa de quadros (no terminal).
+const STATS_INTERVAL: Duration = Duration::from_secs(10);
+
+impl Player {
+    /// O quadro a enviar agora, avançando a animação se chegou a hora.
+    fn current<'a>(&mut self, frames: &'a [PreparedFrame]) -> &'a PreparedFrame {
+        let now = Instant::now();
+        match self.advance_at {
+            None => self.advance_at = Some(now + frames[0].delay.unwrap_or(Duration::MAX / 4)),
+            Some(at) if now >= at && frames.len() > 1 => {
+                self.index = (self.index + 1) % frames.len();
+                let delay = frames[self.index].delay.unwrap_or_default();
+                // Atrasou mais de um quadro: recomeça a contagem a partir de
+                // agora, em vez de acelerar para recuperar o tempo perdido.
+                let base = if now - at > delay { now } else { at };
+                self.advance_at = Some(base + delay);
+            }
+            Some(_) => {}
+        }
+        &frames[self.index]
+    }
+
+    /// Próximo envio: a troca de quadro ou, se demorar, o reenvio que mantém
+    /// a imagem na tela.
+    fn next_send(&self, frames: &[PreparedFrame], resend: Duration) -> Instant {
+        let keepalive = Instant::now() + resend;
+        match self.advance_at {
+            Some(at) if frames.len() > 1 => at.min(keepalive),
+            _ => keepalive,
+        }
+    }
+
+    fn sent(&mut self, took: Duration) {
+        self.stats_frames += 1;
+        self.stats_busy += took;
+        let elapsed = self.stats_since.elapsed();
+        if elapsed >= STATS_INTERVAL {
+            let fps = f64::from(self.stats_frames) / elapsed.as_secs_f64();
+            let avg = self.stats_busy / self.stats_frames;
+            eprintln!(
+                "telinhas: {fps:.1} quadros/s; envio médio de {:.1} ms por quadro",
+                avg.as_secs_f64() * 1000.0
+            );
+            self.stats_since = Instant::now();
+            self.stats_frames = 0;
+            self.stats_busy = Duration::ZERO;
+        }
+    }
 }

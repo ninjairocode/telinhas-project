@@ -42,7 +42,7 @@ enum Device {
 struct Picture {
     name: String,
     preview: Handle,
-    jpeg: Arc<Vec<u8>>,
+    frames: Arc<Vec<imaging::PreparedFrame>>,
 }
 
 pub struct App {
@@ -173,7 +173,9 @@ impl cosmic::Application for App {
             Message::PickImage => {
                 return cosmic::task::future(async {
                     let mut filter = FileFilter::new("Imagens");
-                    for ext in ["jpg", "jpeg", "png", "webp", "JPG", "JPEG", "PNG", "WEBP"] {
+                    for ext in [
+                        "jpg", "jpeg", "png", "webp", "gif", "JPG", "JPEG", "PNG", "WEBP", "GIF",
+                    ] {
                         filter = filter.glob(&format!("*.{ext}"));
                     }
                     let dialog = file_chooser::open::Dialog::new()
@@ -211,6 +213,11 @@ impl cosmic::Application for App {
                     }
                     self.save_config();
                 }
+                let name = if prepared.is_animated() {
+                    format!("{name} (animação, {} quadros)", prepared.frames.len())
+                } else {
+                    name
+                };
                 self.picture = Some(Picture {
                     name,
                     preview: Handle::from_rgba(
@@ -218,7 +225,7 @@ impl cosmic::Application for App {
                         prepared.height,
                         prepared.rgba.clone(),
                     ),
-                    jpeg: Arc::new(prepared.jpeg.clone()),
+                    frames: Arc::new(prepared.frames.clone()),
                 });
                 // Imagem nova (ou restaurada): entrega ao worker se estiver mostrando.
                 self.sent = false;
@@ -313,7 +320,7 @@ impl cosmic::Application for App {
                 settings::item::builder(
                     self.picture
                         .as_ref()
-                        .map_or("Recortada para 720×720", |p| p.name.as_str()),
+                        .map_or("Imagem ou GIF, recortada para a tela", |p| p.name.as_str()),
                 )
                 .control(
                     widget::row::with_capacity(2)
@@ -432,7 +439,7 @@ impl App {
             return;
         }
         let cmd = match (&self.picture, self.showing) {
-            (Some(p), true) => Command::Show(p.jpeg.clone()),
+            (Some(p), true) => Command::Show(p.frames.clone()),
             _ => Command::Stop,
         };
         self.send(cmd);

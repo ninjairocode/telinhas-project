@@ -31,7 +31,13 @@ Telinhas has its own implementation in `crates/telinhas-core/src/protocol/by.rs`
   `0x5A` bytes long, so its length field is escaped as `5B 01`; this confirms
   the escaping.)
 
-Not tested yet: rotations 180/270, maximum frame rate.
+- Animation (`telinhas show anim.gif`, 2026-10-31): 24 frames of ~23 KB at
+  20 frames/s for 20 s, smooth on screen. Each frame (24 reports) took
+  ~4.5 ms to write, so the USB link has plenty of headroom; Telinhas caps
+  animations at 20 frames/s (`imaging::MIN_FRAME_DELAY`) until higher rates are
+  tested visually.
+
+Not tested yet: rotations 180/270, frame rates above 20/s.
 
 ## Static analysis of the official installer
 
