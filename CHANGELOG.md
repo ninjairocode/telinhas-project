@@ -4,6 +4,18 @@ All notable changes to Telinhas are listed here. Versions follow
 [Semantic Versioning](https://semver.org); while the version is `0.x`, any
 release may change behavior.
 
+## [0.2.1] - 2026-10-31
+
+### Changed
+
+- Faster JPEG encoding: drawing metrics over each GIF frame takes about half
+  the CPU time, so 20 frames/s GIFs keep their speed with all metrics on.
+
+### Fixed
+
+- Flatpak: "Start with the system" now works on desktops without the
+  Background portal, such as COSMIC.
+
 ## [0.2.0] - 2026-10-31
 
 ### Added
@@ -42,5 +54,6 @@ First public release. Early stage: one supported device.
   `listen`, `udev-rules`.
 - AppImage built by GitHub Actions, with update information for AppImageUpdate.
 
+[0.2.1]: https://github.com/ninjairocode/telinhas-project/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ninjairocode/telinhas-project/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ninjairocode/telinhas-project/releases/tag/v0.1.0

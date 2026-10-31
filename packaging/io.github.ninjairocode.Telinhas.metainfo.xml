@@ -83,6 +83,14 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.1" date="2026-10-31">
+      <description>
+        <p>
+          Faster drawing of metrics over GIFs, and "Start with the system" now
+          works in the Flatpak on desktops without the Background portal.
+        </p>
+      </description>
+    </release>
     <release version="0.2.0" date="2026-10-31">
       <description>
         <p>
