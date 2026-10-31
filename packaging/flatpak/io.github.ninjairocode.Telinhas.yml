@@ -19,7 +19,6 @@ finish-args:
   - --share=ipc
   - --socket=wayland
   - --socket=fallback-x11
-  - --device=dri
   # The mini screens are USB HID devices (/dev/hidraw*); access still needs
   # the udev rule installed on the host (see README).
   - --device=all

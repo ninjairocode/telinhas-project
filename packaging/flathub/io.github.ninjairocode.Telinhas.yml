@@ -1,0 +1,46 @@
+# Manifest submitted to Flathub (https://github.com/flathub/flathub).
+# Copy it, together with ../flatpak/cargo-sources.json, to the root of the
+# Flathub repository. For each release, update `tag` and `commit`.
+id: io.github.ninjairocode.Telinhas
+runtime: org.freedesktop.Platform
+runtime-version: '26.08'
+base: com.system76.Cosmic.BaseApp
+base-version: stable
+sdk: org.freedesktop.Sdk
+sdk-extensions:
+  - org.freedesktop.Sdk.Extension.rust-stable
+command: telinhas-gui
+finish-args:
+  - --share=ipc
+  - --socket=wayland
+  - --socket=fallback-x11
+  # The mini screens are USB HID devices (/dev/hidraw*); access still needs
+  # the udev rule installed on the host (see README).
+  - --device=all
+  # COSMIC theme and settings.
+  - --talk-name=com.system76.CosmicSettingsDaemon
+  - --filesystem=xdg-config/cosmic:ro
+  # "Start with the system" on desktops without the Background portal (COSMIC).
+  - --filesystem=xdg-config/autostart:create
+build-options:
+  append-path: /usr/lib/sdk/rust-stable/bin
+modules:
+  - name: telinhas
+    buildsystem: simple
+    build-options:
+      env:
+        CARGO_HOME: /run/build/telinhas/cargo
+    build-commands:
+      - cargo --offline fetch --manifest-path Cargo.toml --verbose
+      - cargo --offline build --release --verbose -p telinhas-gui -p telinhas
+      - install -Dm0755 target/release/telinhas-gui /app/bin/telinhas-gui
+      - install -Dm0755 target/release/telinhas /app/bin/telinhas
+      - install -Dm0644 packaging/io.github.ninjairocode.Telinhas.desktop /app/share/applications/io.github.ninjairocode.Telinhas.desktop
+      - install -Dm0644 packaging/io.github.ninjairocode.Telinhas.metainfo.xml /app/share/metainfo/io.github.ninjairocode.Telinhas.metainfo.xml
+      - cp -r packaging/icons /app/share/
+    sources:
+      - type: git
+        url: https://github.com/ninjairocode/telinhas-project.git
+        tag: v0.2.1
+        commit: 0cff419bd902dcc75da81bb4f0cb64d42838d3c9
+      - cargo-sources.json
