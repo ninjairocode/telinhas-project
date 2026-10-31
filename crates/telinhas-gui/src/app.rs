@@ -2,16 +2,30 @@ use std::path::PathBuf;
 use std::sync::mpsc::Sender;
 use std::sync::Arc;
 
+use cosmic::app::CosmicFlags;
 use cosmic::dialog::file_chooser::{self, FileFilter};
-use cosmic::iced::{Alignment, Length, Subscription};
+use cosmic::iced::{window, Alignment, Length, Size, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, image::Handle, settings};
 use telinhas_core::devices::{self, DeviceInfo, KNOWN_DEVICES};
 use telinhas_core::{imaging, Capabilities, ScreenStatus};
 
+use crate::config::{self, Config};
 use crate::worker::{self, Command, Event};
 
+pub const APP_ID: &str = "io.github.ninjairocode.Telinhas";
 const PREVIEW_SIZE: f32 = 360.0;
+const WINDOW_SIZE: Size = Size::new(560.0, 820.0);
+const WINDOW_MIN: Size = Size::new(420.0, 560.0);
+
+/// Flags de inicialização; exigidas pela instância única do libcosmic.
+#[derive(Debug, Clone, Default)]
+pub struct Flags;
+
+impl CosmicFlags for Flags {
+    type SubCommand = String;
+    type Args = Vec<String>;
+}
 
 enum Device {
     Searching,
@@ -38,6 +52,9 @@ pub struct App {
     picture: Option<Picture>,
     loading: bool,
     showing: bool,
+    /// O quadro atual já foi entregue ao worker.
+    sent: bool,
+    config: Config,
     /// Valor do slider enquanto arrasta; só é enviado ao soltar.
     brightness: u8,
     error: Option<String>,
@@ -49,8 +66,17 @@ pub enum Message {
     PickImage,
     Picked(PathBuf),
     PickCancelled,
-    Prepared(String, Arc<imaging::Prepared>),
+    /// Imagem pronta; `source` traz o arquivo escolhido agora (para guardar
+    /// uma cópia), ou `None` quando veio da configuração salva.
+    Prepared {
+        name: String,
+        prepared: Arc<imaging::Prepared>,
+        source: Option<(PathBuf, Arc<Vec<u8>>)>,
+    },
     ToggleShow,
+    ToggleAutostart(bool),
+    WindowClosed(window::Id),
+    Quit,
     BrightnessDrag(u8),
     BrightnessRelease,
     Rotation(usize),
@@ -61,10 +87,10 @@ pub enum Message {
 
 impl cosmic::Application for App {
     type Executor = cosmic::executor::Default;
-    type Flags = ();
+    type Flags = Flags;
     type Message = Message;
 
-    const APP_ID: &'static str = "io.github.ninjairocode.Telinhas";
+    const APP_ID: &'static str = APP_ID;
 
     fn core(&self) -> &cosmic::Core {
         &self.core
@@ -74,22 +100,67 @@ impl cosmic::Application for App {
         &mut self.core
     }
 
-    fn init(core: cosmic::Core, _flags: ()) -> (Self, Task<cosmic::Action<Message>>) {
+    fn init(core: cosmic::Core, _flags: Flags) -> (Self, Task<cosmic::Action<Message>>) {
+        let config = Config::load();
         let mut app = App {
             core,
             cmds: None,
             device: Device::Searching,
             picture: None,
             loading: false,
-            showing: false,
+            showing: config.showing,
+            sent: false,
             brightness: 100,
             error: None,
+            config,
         };
-        let task = match app.core.main_window_id() {
-            Some(id) => app.set_window_title("Telinhas".into(), id),
-            None => Task::none(),
-        };
-        (app, task)
+        let mut tasks = Vec::new();
+        if let Some(id) = app.core.main_window_id() {
+            tasks.push(app.set_window_title("Telinhas".into(), id));
+        }
+        // Restaura o fundo salvo (e volta a mostrá-lo, se estava mostrando).
+        if let Some(path) = app.config.background_path().filter(|p| p.exists()) {
+            let name = app.config.background_name.clone().unwrap_or_default();
+            tasks.push(app.load(path, name, false));
+        } else {
+            app.showing = false;
+        }
+        (app, Task::batch(tasks))
+    }
+
+    fn header_end(&self) -> Vec<Element<'_, Message>> {
+        vec![widget::button::text("Sair").on_press(Message::Quit).into()]
+    }
+
+    fn on_close_requested(&self, id: window::Id) -> Option<Message> {
+        Some(Message::WindowClosed(id))
+    }
+
+    /// Abrir o Telinhas de novo (pelo menu) com ele já rodando reabre a janela.
+    fn dbus_activation(
+        &mut self,
+        _msg: cosmic::dbus_activation::Message,
+    ) -> Task<cosmic::Action<Message>> {
+        if self.core.main_window_id().is_some() {
+            return Task::none();
+        }
+        let (id, open) = window::open(window::Settings {
+            size: WINDOW_SIZE,
+            min_size: Some(WINDOW_MIN),
+            decorations: false,
+            transparent: true,
+            resizable: true,
+            resize_border: 8,
+            exit_on_close_request: false,
+            platform_specific: window::settings::PlatformSpecific {
+                application_id: APP_ID.into(),
+                ..Default::default()
+            },
+            ..Default::default()
+        });
+        self.core.set_main_window_id(Some(id));
+        let title = self.set_window_title("Telinhas".into(), id);
+        Task::batch([open.discard(), title])
     }
 
     fn subscription(&self) -> Subscription<Message> {
@@ -122,33 +193,24 @@ impl cosmic::Application for App {
             }
             Message::PickCancelled => {}
             Message::Picked(path) => {
-                self.loading = true;
-                let info = self.screen_info();
-                return cosmic::task::future(async move {
-                    let name = path
-                        .file_name()
-                        .map(|n| n.to_string_lossy().into_owned())
-                        .unwrap_or_default();
-                    let prepared = tokio::task::spawn_blocking(move || {
-                        let bytes = std::fs::read(&path)?;
-                        Ok::<_, Box<dyn std::error::Error + Send + Sync>>(imaging::prepare(
-                            &bytes,
-                            info.width,
-                            info.height,
-                            jpeg_quality(info),
-                        )?)
-                    })
-                    .await;
-                    match prepared {
-                        Ok(Ok(p)) => Message::Prepared(name, Arc::new(p)),
-                        Ok(Err(e)) => Message::Error(format!("{name}: {e}")),
-                        Err(e) => Message::Error(e.to_string()),
-                    }
-                });
+                let name = path
+                    .file_name()
+                    .map(|n| n.to_string_lossy().into_owned())
+                    .unwrap_or_default();
+                return self.load(path, name, true);
             }
-            Message::Prepared(name, prepared) => {
+            Message::Prepared {
+                name,
+                prepared,
+                source,
+            } => {
                 self.loading = false;
-                let jpeg = Arc::new(prepared.jpeg.clone());
+                if let Some((path, bytes)) = source {
+                    if let Err(e) = self.config.store_background(&bytes, &path) {
+                        self.error = Some(format!("não foi possível guardar a imagem: {e}"));
+                    }
+                    self.save_config();
+                }
                 self.picture = Some(Picture {
                     name,
                     preview: Handle::from_rgba(
@@ -156,23 +218,32 @@ impl cosmic::Application for App {
                         prepared.height,
                         prepared.rgba.clone(),
                     ),
-                    jpeg: jpeg.clone(),
+                    jpeg: Arc::new(prepared.jpeg.clone()),
                 });
-                // Trocou a imagem enquanto mostrava: atualiza a tela.
-                if self.showing {
-                    self.send(Command::Show(jpeg));
-                }
+                // Imagem nova (ou restaurada): entrega ao worker se estiver mostrando.
+                self.sent = false;
+                self.sync_worker();
             }
             Message::ToggleShow => {
-                if self.showing {
-                    self.showing = false;
-                    self.send(Command::Stop);
-                } else if let Some(p) = &self.picture {
-                    let jpeg = p.jpeg.clone();
-                    self.showing = true;
-                    self.send(Command::Show(jpeg));
+                self.showing = !self.showing && self.picture.is_some();
+                self.sent = false;
+                self.sync_worker();
+                self.config.showing = self.showing;
+                self.save_config();
+            }
+            Message::ToggleAutostart(enable) => match config::set_autostart(enable) {
+                Ok(()) => {
+                    self.config.autostart = enable;
+                    self.save_config();
+                }
+                Err(e) => self.error = Some(format!("início automático: {e}")),
+            },
+            Message::WindowClosed(id) => {
+                if self.core.main_window_id() == Some(id) {
+                    self.core.set_main_window_id(None);
                 }
             }
+            Message::Quit => return cosmic::iced::exit(),
             Message::BrightnessDrag(v) => self.brightness = v,
             Message::BrightnessRelease => self.send(Command::SetBrightness(self.brightness)),
             Message::Rotation(i) => {
@@ -293,6 +364,20 @@ impl cosmic::Application for App {
             }
         }
 
+        content = content.push(
+            settings::section()
+                .title("Segundo plano")
+                .add(
+                    settings::item::builder("Iniciar com o sistema")
+                        .description("Restaura a imagem na tela ao entrar na sessão")
+                        .toggler(self.config.autostart, Message::ToggleAutostart),
+                )
+                .add(widget::text::caption(
+                    "Fechar esta janela não para a tela: o Telinhas continua rodando. \
+                     Abra-o pelo menu para ver a janela de novo; use \"Sair\" para encerrar.",
+                )),
+        );
+
         widget::scrollable(
             widget::container(content.max_width(640))
                 .width(Length::Fill)
@@ -312,6 +397,54 @@ impl App {
         }
     }
 
+    /// Prepara um arquivo de imagem fora da thread da interface.
+    fn load(
+        &mut self,
+        path: PathBuf,
+        name: String,
+        keep_source: bool,
+    ) -> Task<cosmic::Action<Message>> {
+        self.loading = true;
+        let info = self.screen_info();
+        cosmic::task::future(async move {
+            let result = tokio::task::spawn_blocking(move || {
+                let bytes = std::fs::read(&path)?;
+                let prepared =
+                    imaging::prepare(&bytes, info.width, info.height, jpeg_quality(info))?;
+                Ok::<_, Box<dyn std::error::Error + Send + Sync>>((path, bytes, prepared))
+            })
+            .await;
+            match result {
+                Ok(Ok((path, bytes, prepared))) => Message::Prepared {
+                    name,
+                    prepared: Arc::new(prepared),
+                    source: keep_source.then(|| (path, Arc::new(bytes))),
+                },
+                Ok(Err(e)) => Message::Error(format!("{name}: {e}")),
+                Err(e) => Message::Error(e.to_string()),
+            }
+        })
+    }
+
+    /// Entrega ao worker o que a interface quer na tela (uma vez por mudança).
+    fn sync_worker(&mut self) {
+        if self.sent || self.cmds.is_none() {
+            return;
+        }
+        let cmd = match (&self.picture, self.showing) {
+            (Some(p), true) => Command::Show(p.jpeg.clone()),
+            _ => Command::Stop,
+        };
+        self.send(cmd);
+        self.sent = true;
+    }
+
+    fn save_config(&mut self) {
+        if let Err(e) = self.config.save() {
+            self.error = Some(format!("não foi possível salvar a configuração: {e}"));
+        }
+    }
+
     fn screen_info(&self) -> &'static DeviceInfo {
         match &self.device {
             Device::Connected { info, .. } => info,
@@ -321,7 +454,10 @@ impl App {
 
     fn on_worker(&mut self, event: Event) {
         match event {
-            Event::Ready(tx) => self.cmds = Some(tx),
+            Event::Ready(tx) => {
+                self.cmds = Some(tx);
+                self.sync_worker();
+            }
             Event::Connected { info, caps, status } => {
                 self.brightness = status.brightness.unwrap_or(self.brightness);
                 let rotation_labels = caps.rotations.iter().map(|d| format!("{d}°")).collect();

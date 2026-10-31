@@ -2839,6 +2839,7 @@ dependencies = [
  "palette",
  "phf",
  "rfd",
+ "ron",
  "roxmltree",
  "rust-embed",
  "serde",
@@ -4658,6 +4659,8 @@ name = "telinhas-gui"
 version = "0.1.0"
 dependencies = [
  "libcosmic",
+ "serde",
+ "serde_json",
  "telinhas-core",
  "tokio",
 ]

@@ -1,11 +1,16 @@
 mod app;
+mod config;
 mod worker;
 
+use std::ffi::OsString;
+
 fn main() -> cosmic::iced::Result {
-    // Com argumentos (`Telinhas.AppImage list`), repassa para a CLI instalada ao
+    // `--background`: inicia sem janela (início automático com a sessão).
+    // Outros argumentos (`Telinhas.AppImage list`) vão para a CLI instalada ao
     // lado deste binário; sem argumentos, abre a janela.
-    let args: Vec<_> = std::env::args_os().skip(1).collect();
-    if !args.is_empty() {
+    let args: Vec<OsString> = std::env::args_os().skip(1).collect();
+    let background = args.first().is_some_and(|a| a == "--background");
+    if !args.is_empty() && !background {
         std::process::exit(run_cli(&args));
     }
 
@@ -15,11 +20,15 @@ fn main() -> cosmic::iced::Result {
             cosmic::iced::Limits::NONE
                 .min_width(420.0)
                 .min_height(560.0),
-        );
-    cosmic::app::run::<app::App>(settings, ())
+        )
+        // Fechar a janela não encerra: a imagem continua na tela.
+        .exit_on_close(false)
+        .no_main_window(background);
+    // Se já houver uma instância rodando, ela reabre a janela e esta termina.
+    cosmic::app::run_single_instance::<app::App>(settings, app::Flags)
 }
 
-fn run_cli(args: &[std::ffi::OsString]) -> i32 {
+fn run_cli(args: &[OsString]) -> i32 {
     let cli = std::env::current_exe()
         .ok()
         .and_then(|exe| Some(exe.parent()?.join("telinhas")))
