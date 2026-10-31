@@ -126,3 +126,23 @@ pub fn set_autostart(enable: bool) -> io::Result<()> {
         ),
     )
 }
+
+/// Está rodando dentro do Flatpak?
+pub fn in_flatpak() -> bool {
+    std::env::var_os("FLATPAK_ID").is_some()
+}
+
+/// No Flatpak, o início automático é pedido ao portal Background (o app não
+/// enxerga `~/.config/autostart`). Devolve se o pedido foi concedido.
+pub async fn set_autostart_portal(enable: bool) -> Result<bool, String> {
+    use ashpd::desktop::background::Background;
+    let response = Background::request()
+        .reason("Keep the image on your mini screens after you log in")
+        .auto_start(enable)
+        .command(["telinhas-gui", "--background"])
+        .send()
+        .await
+        .and_then(|r| r.response())
+        .map_err(|e| e.to_string())?;
+    Ok(response.auto_start() == enable)
+}

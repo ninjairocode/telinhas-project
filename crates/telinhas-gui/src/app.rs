@@ -108,6 +108,7 @@ pub enum Message {
     /// Relê as métricas para a prévia.
     Tick,
     ToggleAutostart(bool),
+    AutostartChanged(bool),
     WindowClosed(window::Id),
     Quit,
     BrightnessDrag(u8),
@@ -320,13 +321,23 @@ impl cosmic::Application for App {
                 self.readings = self.sensors.sample(&self.config.metrics);
                 self.refresh_preview();
             }
+            Message::ToggleAutostart(enable) if config::in_flatpak() => {
+                return cosmic::task::future(async move {
+                    match config::set_autostart_portal(enable).await {
+                        Ok(true) => Message::AutostartChanged(enable),
+                        Ok(false) => Message::Error("start with the system was not allowed".into()),
+                        Err(e) => Message::Error(format!("start with the system: {e}")),
+                    }
+                });
+            }
             Message::ToggleAutostart(enable) => match config::set_autostart(enable) {
-                Ok(()) => {
-                    self.config.autostart = enable;
-                    self.save_config();
-                }
+                Ok(()) => return self.update(Message::AutostartChanged(enable)),
                 Err(e) => self.error = Some(format!("start with the system: {e}")),
             },
+            Message::AutostartChanged(enable) => {
+                self.config.autostart = enable;
+                self.save_config();
+            }
             Message::WindowClosed(id) => {
                 if self.core.main_window_id() == Some(id) {
                     self.core.set_main_window_id(None);

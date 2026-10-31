@@ -4809,7 +4809,7 @@ dependencies = [
 
 [[package]]
 name = "telinhas"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "clap",
  "telinhas-core",
@@ -4817,7 +4817,7 @@ dependencies = [
 
 [[package]]
 name = "telinhas-core"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
  "ab_glyph",
  "hidapi",
@@ -4830,8 +4830,9 @@ dependencies = [
 
 [[package]]
 name = "telinhas-gui"
-version = "0.1.0"
+version = "0.2.0"
 dependencies = [
+ "ashpd 0.12.3",
  "libcosmic",
  "serde",
  "serde_json",

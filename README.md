@@ -27,22 +27,23 @@ interface for the [COSMIC](https://system76.com/cosmic) desktop.
 
 **Today you can:**
 
-- show an image on the screen (automatically cropped to its resolution);
+- show an image or an animated GIF on the screen (cropped to its resolution);
+- draw system metrics over it: CPU and GPU temperature, CPU and memory usage;
 - adjust brightness and rotation;
-- plug and unplug the screen while the app is open (it reconnects by itself).
+- keep it running in the background and start it with the system;
+- plug and unplug the screen while the app is running (it reconnects by itself).
 
 **Planned:**
 
 - support for more device models and brands;
-- system information on the screen, such as CPU temperature and usage;
-- running in the background and starting with the system;
-- animations and video.
+- more metrics and layouts;
+- video.
 
 ## Supported devices
 
 | Device | USB ID | Status |
 |---|---|---|
-| Thermaltake TH360 V3 Ultra ARGB Sync (720×720 LCD) | `264a:2348` | Works (image, brightness, rotation) |
+| Thermaltake TH360 V3 Ultra ARGB Sync (720×720 LCD) | `264a:2348` | Works (image, GIF, metrics, brightness, rotation) |
 
 Other Thermaltake screens that use the same "BY" protocol may work with small
 changes, but they have not been tested. If you own a different screen and want
@@ -89,19 +90,26 @@ apps cannot install it on the system by themselves.
 
 ### Graphical interface
 
-1. Click **Choose image…** and pick a JPEG, PNG or WebP file. A preview shows
-   how it will be cropped.
-2. Click **Show on screen**.
-3. Adjust **Brightness** (applied when you release the slider) and
+1. Click **Choose image…** and pick a JPEG, PNG, WebP or (animated) GIF file.
+   A preview shows how it will be cropped.
+2. Under **Metrics on screen**, tick the metrics you want and pick their
+   **Position** (top, middle or bottom; middle works best on round screens).
+   Without an image, metrics are shown over a dark background.
+3. Click **Show on screen**.
+4. Adjust **Brightness** (applied when you release the slider) and
    **Rotation**.
+
+**Background mode:** closing the window does not stop the screen; Telinhas
+keeps running. Open it again from the app menu to bring the window back, and
+use **Quit** (top bar) to exit. Turn on **Start with the system** to restore
+the image, metrics and settings every time you log in.
 
 > [!NOTE]
 > The screen only keeps a custom image **while Telinhas is running**: the app
-> resends the image every 2 seconds, and the screen goes back to its own
-> picture about 5 seconds after that stops. Minimizing the window is fine;
-> closing it stops the image.
+> keeps sending it, and the screen goes back to its own picture about
+> 5 seconds after that stops (for example, after **Quit**).
 
-The interface is currently in Portuguese; translations are planned.
+Settings are stored in `~/.config/telinhas/`.
 
 ### Command line
 
@@ -111,6 +119,7 @@ The AppImage also works as a command-line tool when given arguments
 ```
 ./Telinhas-x86_64.AppImage list                         # find supported screens
 ./Telinhas-x86_64.AppImage show photo.png --seconds 30  # show an image
+./Telinhas-x86_64.AppImage show anim.gif --metrics cpu-temp,ram-usage
 ./Telinhas-x86_64.AppImage show --color ff0000          # solid color
 ./Telinhas-x86_64.AppImage set --brightness 60 --rotate 90
 ./Telinhas-x86_64.AppImage prepare photo.png -o out.jpg # only convert, send nothing
@@ -118,8 +127,9 @@ The AppImage also works as a command-line tool when given arguments
 ./Telinhas-x86_64.AppImage listen --seconds 10          # read-only debugging
 ```
 
-`probe`, `show` and `set` send data to the device; add `--dry-run` to see the
-bytes without sending them.
+`probe`, `show` and `set` send data to the device; add `--dry-run` to see what
+would be sent without sending it. Metrics: `cpu-temp`, `cpu-usage`,
+`gpu-temp`, `ram-usage`; position: `--metrics-position top|middle|bottom`.
 
 ## Updating
 
@@ -154,11 +164,27 @@ and takes a few minutes. Install the udev rule from
 
 | Path | Contents |
 |---|---|
-| `crates/telinhas-core` | Device drivers, HID transport, protocols, image handling |
+| `crates/telinhas-core` | Device drivers, transports, protocols, images/GIFs, sensors, metrics overlay |
 | `crates/telinhas` | Command-line tool |
 | `crates/telinhas-gui` | COSMIC interface (libcosmic) |
 | `packaging/` | udev rule, desktop entry, AppStream metadata, icons |
+| `packaging/flatpak/` | Flatpak manifest |
 | `docs/PROTOCOL.md` | Notes on the Thermaltake "BY" protocol |
+| `docs/ADDING_A_DEVICE.md` | How to add support for a new screen |
+
+### Flatpak
+
+```
+sudo apt install flatpak-builder python3-aiohttp python3-tomlkit python3-yaml
+curl -O https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
+python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+flatpak-builder --user --install --install-deps-from=flathub --force-clean \
+  build-dir packaging/flatpak/io.github.ninjairocode.Telinhas.yml
+flatpak run io.github.ninjairocode.Telinhas
+```
+
+The Noto Sans font in `crates/telinhas-core/assets/fonts/` is under the SIL
+Open Font License 1.1 (`OFL.txt` next to it).
 
 ## Contributing
 

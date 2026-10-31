@@ -2,3 +2,5 @@
 /AppDir
 *.AppImage
 /.idea/
+/build-dir
+/.flatpak-builder

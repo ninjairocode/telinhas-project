@@ -28,22 +28,24 @@ em Rust, com interface nativa para o desktop [COSMIC](https://system76.com/cosmi
 
 **Hoje você pode:**
 
-- mostrar uma imagem na tela (recortada automaticamente na resolução dela);
+- mostrar uma imagem ou um GIF animado na tela (recortado na resolução dela);
+- desenhar métricas do sistema por cima: temperatura da CPU e da GPU, uso de
+  CPU e de memória;
 - ajustar brilho e rotação;
-- conectar e desconectar a tela com o app aberto (ele reconecta sozinho).
+- manter o app em segundo plano e iniciá-lo com o sistema;
+- conectar e desconectar a tela com o app rodando (ele reconecta sozinho).
 
 **Planejado:**
 
 - suporte a mais modelos e marcas;
-- informações do sistema na tela, como temperatura e uso do processador;
-- funcionar em segundo plano e iniciar com o sistema;
-- animações e vídeo.
+- mais métricas e layouts;
+- vídeo.
 
 ## Dispositivos suportados
 
 | Dispositivo | ID USB | Estado |
 |---|---|---|
-| Thermaltake TH360 V3 Ultra ARGB Sync (LCD 720×720) | `264a:2348` | Funciona (imagem, brilho, rotação) |
+| Thermaltake TH360 V3 Ultra ARGB Sync (LCD 720×720) | `264a:2348` | Funciona (imagem, GIF, métricas, brilho, rotação) |
 
 Outras telas Thermaltake que usam o mesmo protocolo "BY" podem funcionar com
 pequenos ajustes, mas não foram testadas. Se você tem outra tela e quer ajudar,
@@ -90,16 +92,27 @@ conseguem instalá-la no sistema sozinhos.
 
 ### Interface gráfica
 
-1. Clique em **Escolher imagem…** e selecione um JPEG, PNG ou WebP. A prévia
-   mostra como ela será recortada.
-2. Clique em **Mostrar na tela**.
-3. Ajuste o **Brilho** (aplicado ao soltar o controle) e a **Rotação**.
+A interface está em inglês; os nomes abaixo são os que aparecem na janela.
+
+1. Clique em **Choose image…** e selecione um JPEG, PNG, WebP ou GIF
+   (animado ou não). A prévia mostra como ele será recortado.
+2. Em **Metrics on screen**, marque as métricas desejadas e escolha a
+   **Position** (topo, meio ou embaixo; o meio funciona melhor em telas
+   redondas). Sem imagem, as métricas aparecem sobre um fundo escuro.
+3. Clique em **Show on screen**.
+4. Ajuste **Brightness** (aplicado ao soltar o controle) e **Rotation**.
+
+**Segundo plano:** fechar a janela não para a tela; o Telinhas continua
+rodando. Abra-o de novo pelo menu de aplicativos para ver a janela, e use
+**Quit** (barra superior) para encerrar. Ative **Start with the system** para
+restaurar imagem, métricas e ajustes sempre que entrar na sessão.
 
 > [!NOTE]
-> A tela só mantém a imagem escolhida **enquanto o Telinhas estiver aberto**:
-> o app reenvia a imagem a cada 2 segundos, e a tela volta à própria imagem
-> uns 5 segundos depois que isso para. Minimizar a janela não atrapalha;
-> fechá-la encerra a imagem.
+> A tela só mantém a imagem escolhida **enquanto o Telinhas estiver rodando**:
+> o app continua enviando a imagem, e a tela volta à própria imagem uns
+> 5 segundos depois que isso para (por exemplo, depois de **Quit**).
+
+As configurações ficam em `~/.config/telinhas/`.
 
 ### Linha de comando
 
@@ -109,6 +122,7 @@ argumentos (`telinhas`, se compilado do código-fonte):
 ```
 ./Telinhas-x86_64.AppImage list                         # procura telas suportadas
 ./Telinhas-x86_64.AppImage show foto.png --seconds 30   # mostra uma imagem
+./Telinhas-x86_64.AppImage show anim.gif --metrics cpu-temp,ram-usage
 ./Telinhas-x86_64.AppImage show --color ff0000          # cor sólida
 ./Telinhas-x86_64.AppImage set --brightness 60 --rotate 90
 ./Telinhas-x86_64.AppImage prepare foto.png -o saida.jpg # só converte, não envia
@@ -117,7 +131,9 @@ argumentos (`telinhas`, se compilado do código-fonte):
 ```
 
 `probe`, `show` e `set` enviam dados ao dispositivo; acrescente `--dry-run`
-para ver os bytes sem enviar.
+para ver o que seria enviado, sem enviar. Métricas: `cpu-temp`, `cpu-usage`,
+`gpu-temp`, `ram-usage`; posição: `--metrics-position top|middle|bottom`. As
+mensagens da linha de comando também estão em inglês.
 
 ## Atualização
 
@@ -153,11 +169,27 @@ como em [AppImage](#appimage).
 
 | Caminho | Conteúdo |
 |---|---|
-| `crates/telinhas-core` | Drivers dos dispositivos, transporte HID, protocolos, imagens |
+| `crates/telinhas-core` | Drivers, transportes, protocolos, imagens/GIFs, sensores, desenho das métricas |
 | `crates/telinhas` | Ferramenta de linha de comando |
 | `crates/telinhas-gui` | Interface COSMIC (libcosmic) |
 | `packaging/` | Regra udev, atalho do menu, metadados AppStream, ícones |
+| `packaging/flatpak/` | Manifesto Flatpak |
 | `docs/PROTOCOL.md` | Notas sobre o protocolo "BY" da Thermaltake (em inglês) |
+| `docs/ADDING_A_DEVICE.md` | Como adicionar uma tela nova (em inglês) |
+
+### Flatpak
+
+```
+sudo apt install flatpak-builder python3-aiohttp python3-tomlkit python3-yaml
+curl -O https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
+python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
+flatpak-builder --user --install --install-deps-from=flathub --force-clean \
+  build-dir packaging/flatpak/io.github.ninjairocode.Telinhas.yml
+flatpak run io.github.ninjairocode.Telinhas
+```
+
+A fonte Noto Sans em `crates/telinhas-core/assets/fonts/` está sob a SIL Open
+Font License 1.1 (`OFL.txt` ao lado dela).
 
 ## Como contribuir
 

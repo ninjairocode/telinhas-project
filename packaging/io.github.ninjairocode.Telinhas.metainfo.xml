@@ -27,13 +27,14 @@
     </p>
     <p>Current features:</p>
     <ul>
-      <li>Show an image on the screen, cropped to its native resolution</li>
+      <li>Show an image or an animated GIF on the screen, cropped to its resolution</li>
+      <li>Draw system metrics over it: CPU and GPU temperature, CPU and memory usage</li>
       <li>Adjust brightness and rotation</li>
+      <li>Keep running in the background and start with the system</li>
       <li>Detect when the screen is connected or disconnected</li>
     </ul>
     <p>
-      Planned: more device models and system information on the screen, such
-      as the CPU temperature.
+      Planned: more device models and brands, and more metrics.
     </p>
     <p>
       Accessing the screen requires a udev rule on the host; the app shows the
@@ -43,7 +44,7 @@
 
   <screenshots>
     <screenshot type="default">
-      <caption>Screen status, image preview, brightness and rotation</caption>
+      <caption>Screen status, image preview, metrics and adjustments</caption>
       <image>https://raw.githubusercontent.com/ninjairocode/telinhas-project/main/docs/screenshots/main-window.png</image>
     </screenshot>
   </screenshots>
@@ -82,6 +83,15 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.0" date="2026-10-31">
+      <description>
+        <p>
+          Animated GIFs, system metrics on the screen (CPU/GPU temperature,
+          CPU and memory usage), background mode with start on login, and an
+          English interface.
+        </p>
+      </description>
+    </release>
     <release version="0.1.0" date="2026-10-17">
       <description>
         <p>
