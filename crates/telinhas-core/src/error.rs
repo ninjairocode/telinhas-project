@@ -23,6 +23,12 @@ pub enum Error {
     #[error("valor inválido: {0}")]
     InvalidValue(String),
 
+    #[error("nenhuma tela conhecida encontrada")]
+    NoDevice,
+
+    #[error("esta tela não suporta {0}")]
+    Unsupported(&'static str),
+
     #[error("sem resposta do dispositivo ao comando `{0}`")]
     NoResponse(String),
 }

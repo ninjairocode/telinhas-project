@@ -3,14 +3,11 @@ use std::time::{Duration, Instant};
 
 use clap::builder::{PossibleValuesParser, TypedValueParser};
 use clap::{Parser, Subcommand};
-use hidapi::HidApi;
-use telinhas_core::devices::{self, thermaltake};
+use telinhas_core::devices::{self, Bus, Connection, DeviceInfo, FrameFormat, KNOWN_DEVICES};
 use telinhas_core::imaging;
 use telinhas_core::protocol::by;
 use telinhas_core::transport::HidTransport;
 use telinhas_core::Screen;
-
-const UDEV_RULES: &str = include_str!("../../../packaging/99-telinhas.rules");
 
 #[derive(Parser)]
 #[command(
@@ -33,7 +30,8 @@ enum Cmd {
         #[arg(long, default_value_t = 10)]
         seconds: u64,
     },
-    /// Envia só o handshake `conn` do protocolo BY e mostra a resposta
+    /// Depuração: envia só o handshake `conn` do protocolo BY (Thermaltake)
+    /// e mostra a resposta crua
     Probe {
         /// Só mostra os bytes que seriam enviados, sem abrir o dispositivo
         #[arg(long)]
@@ -50,10 +48,12 @@ enum Cmd {
         /// Por quantos segundos manter a imagem (a tela volta sozinha depois)
         #[arg(long, default_value_t = 10)]
         seconds: u64,
-        /// Intervalo entre reenvios do quadro, em milissegundos
-        #[arg(long, default_value_t = 2000)]
-        interval_ms: u64,
-        /// Só mostra os bytes que seriam enviados, sem abrir o dispositivo
+        /// Intervalo entre reenvios do quadro, em milissegundos (padrão: o
+        /// que o modelo exige para manter a imagem)
+        #[arg(long)]
+        interval_ms: Option<u64>,
+        /// Só prepara o quadro e mostra o que seria enviado, sem abrir o
+        /// dispositivo
         #[arg(long)]
         dry_run: bool,
     },
@@ -70,7 +70,7 @@ enum Cmd {
                 .map(|s| s.parse::<u16>().unwrap())
         )]
         rotate: Option<u16>,
-        /// Só mostra os bytes que seriam enviados, sem abrir o dispositivo
+        /// Só mostra o que seria ajustado, sem abrir o dispositivo
         #[arg(long)]
         dry_run: bool,
     },
@@ -81,11 +81,11 @@ enum Cmd {
         /// Arquivo JPEG de saída
         #[arg(short, long)]
         output: PathBuf,
-        /// Largura em pixels (padrão: a da TH360 V3 Ultra)
-        #[arg(long, default_value_t = thermaltake::TH360_V3_ULTRA.width)]
+        /// Largura em pixels (padrão: a do primeiro modelo suportado)
+        #[arg(long, default_value_t = KNOWN_DEVICES[0].width)]
         width: u32,
-        /// Altura em pixels (padrão: a da TH360 V3 Ultra)
-        #[arg(long, default_value_t = thermaltake::TH360_V3_ULTRA.height)]
+        /// Altura em pixels (padrão: a do primeiro modelo suportado)
+        #[arg(long, default_value_t = KNOWN_DEVICES[0].height)]
         height: u32,
         /// Qualidade JPEG (1–100)
         #[arg(long, default_value_t = imaging::DEFAULT_QUALITY)]
@@ -96,18 +96,44 @@ enum Cmd {
 }
 
 /// Abre a primeira tela conhecida e faz o handshake.
-fn open_lcd() -> Result<thermaltake::ThermaltakeLcd, Box<dyn std::error::Error>> {
-    let api = HidApi::new()?;
-    let Some(dev) = devices::detect(&api).into_iter().next() else {
-        return Err("nenhuma tela conhecida encontrada".into());
-    };
-    let mut lcd = thermaltake::ThermaltakeLcd::new(HidTransport::open(&api, dev.vid, dev.pid)?);
-    let s = lcd.connect()?;
-    println!(
-        "Conectado a {} (firmware {}; brilho {}, rotação {}°)",
-        dev.name, s.version.firmware, s.brightness, s.degree
-    );
-    Ok(lcd)
+fn open_screen() -> Result<Box<dyn Screen>, Box<dyn std::error::Error>> {
+    let mut screen = Bus::new()?.open_first()?;
+    let s = screen.connect()?;
+    println!("Conectado a {} ({})", screen.info().name, describe(&s));
+    Ok(screen)
+}
+
+fn describe(s: &telinhas_core::ScreenStatus) -> String {
+    let mut parts = Vec::new();
+    if let Some(f) = &s.firmware {
+        parts.push(format!("firmware {f}"));
+    }
+    if let Some(b) = s.brightness {
+        parts.push(format!("brilho {b}"));
+    }
+    if let Some(r) = s.rotation {
+        parts.push(format!("rotação {r}°"));
+    }
+    parts.join("; ")
+}
+
+fn usb_id(info: &DeviceInfo) -> String {
+    match info.connection {
+        Connection::UsbHid { vid, pid } => format!("{vid:04x}:{pid:04x}"),
+    }
+}
+
+/// Primeira tela conectada usando o transporte HID (para os comandos de
+/// depuração de baixo nível).
+fn open_hid_raw() -> Result<(&'static DeviceInfo, HidTransport), Box<dyn std::error::Error>> {
+    let bus = Bus::new()?;
+    let info = bus
+        .detect()
+        .into_iter()
+        .next()
+        .ok_or(telinhas_core::Error::NoDevice)?;
+    let Connection::UsbHid { vid, pid } = info.connection;
+    Ok((info, HidTransport::open(bus.hid(), vid, pid)?))
 }
 
 fn parse_rgb(s: &str) -> Result<[u8; 3], String> {
@@ -123,7 +149,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
     let cli = Cli::parse();
     match cli.cmd {
         Cmd::UdevRules => {
-            print!("{UDEV_RULES}");
+            print!("{}", devices::udev_rules());
             eprintln!(
                 "\nInstale com:\n  telinhas udev-rules | sudo tee /etc/udev/rules.d/99-telinhas.rules\n  sudo udevadm control --reload && sudo udevadm trigger\nDepois reconecte o USB."
             );
@@ -137,12 +163,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
                 return Ok(());
             }
 
-            let api = HidApi::new()?;
-            let Some(dev) = devices::detect(&api).into_iter().next() else {
-                eprintln!("Nenhuma tela conhecida encontrada.");
-                std::process::exit(1);
-            };
-            let t = HidTransport::open(&api, dev.vid, dev.pid)?;
+            let (dev, t) = open_hid_raw()?;
             // Descarta relatórios antigos para não confundi-los com a resposta.
             while t.read_report(50)?.is_some() {}
 
@@ -181,50 +202,39 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             interval_ms,
             dry_run,
         } => {
-            let info = thermaltake::TH360_V3_ULTRA;
-            let jpeg = match (&input, color) {
-                (Some(path), _) => imaging::prepare_jpeg(
-                    &std::fs::read(path)?,
-                    info.width,
-                    info.height,
-                    imaging::DEFAULT_QUALITY,
-                )?,
-                (None, Some(rgb)) => {
-                    imaging::solid_jpeg(info.width, info.height, rgb, imaging::DEFAULT_QUALITY)?
+            // Sem dispositivo (--dry-run), prepara para o primeiro modelo.
+            let mut screen = if dry_run { None } else { Some(open_screen()?) };
+            let info = screen.as_ref().map_or(&KNOWN_DEVICES[0], |s| s.info());
+            let FrameFormat::Jpeg { quality } = info.frame;
+            let frame = match (&input, color) {
+                (Some(path), _) => {
+                    imaging::prepare_jpeg(&std::fs::read(path)?, info.width, info.height, quality)?
                 }
+                (None, Some(rgb)) => imaging::solid_jpeg(info.width, info.height, rgb, quality)?,
                 (None, None) => unreachable!("clap exige imagem ou --color"),
             };
-            let slices = by::image_slices(&jpeg, 0)?;
-            let realtime = by::encode_frame(&by::request(
-                "realtimeDisplay",
-                by::DEFAULT_SEQ,
-                r#"{"enable": true}"#,
-            ))?;
             println!(
-                "Comando realtimeDisplay ({} bytes): {:02x?}",
-                realtime.len(),
-                realtime
-            );
-            println!(
-                "JPEG {}x{}: {} bytes em {} fatia(s); cabeçalho da 1ª: {:02x?}",
+                "Quadro JPEG {}x{} para {}: {} bytes",
                 info.width,
                 info.height,
-                jpeg.len(),
-                slices.len(),
-                &slices[0][..by::SLICE_HEADER_LEN]
+                info.name,
+                frame.len()
             );
-            if dry_run {
+            let Some(screen) = screen.as_mut() else {
                 return Ok(());
-            }
+            };
 
-            let mut lcd = open_lcd()?;
+            let interval = interval_ms
+                .map(Duration::from_millis)
+                .or(info.keepalive)
+                .unwrap_or(Duration::from_secs(2));
             let end = Instant::now() + Duration::from_secs(seconds);
             let mut n = 0u32;
             while Instant::now() < end {
-                lcd.show_jpeg(&jpeg)?;
+                screen.show_frame(&frame)?;
                 n += 1;
                 println!("Quadro #{n} enviado.");
-                std::thread::sleep(Duration::from_millis(interval_ms));
+                std::thread::sleep(interval);
             }
             println!("Pronto; a tela volta à própria imagem após o timeout dela.");
         }
@@ -233,39 +243,30 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             rotate,
             dry_run,
         } => {
-            let mut cmds = Vec::new();
-            if let Some(v) = brightness {
-                cmds.push(("brightness", format!(r#"{{"value": {v}}}"#)));
-            }
-            if let Some(d) = rotate {
-                cmds.push(("rotate", format!(r#"{{"degree": {d}}}"#)));
-            }
-            if cmds.is_empty() {
+            if brightness.is_none() && rotate.is_none() {
                 eprintln!("Nada a ajustar; use --brightness e/ou --rotate.");
                 std::process::exit(2);
             }
-            for (cmd, json) in &cmds {
-                let frame = by::encode_frame(&by::request(cmd, by::DEFAULT_SEQ, json))?;
-                println!("{cmd} {json} ({} bytes): {:02x?}", frame.len(), frame);
-            }
             if dry_run {
+                if let Some(v) = brightness {
+                    println!("Ajustaria o brilho para {v}.");
+                }
+                if let Some(d) = rotate {
+                    println!("Ajustaria a rotação para {d}°.");
+                }
                 return Ok(());
             }
 
-            let mut lcd = open_lcd()?;
+            let mut screen = open_screen()?;
             if let Some(v) = brightness {
-                lcd.set_brightness(v)?;
+                screen.set_brightness(v)?;
                 println!("Brilho ajustado para {v}.");
             }
             if let Some(d) = rotate {
-                lcd.set_rotation(d)?;
+                screen.set_rotation(d)?;
                 println!("Rotação ajustada para {d}°.");
             }
-            let s = lcd.connect()?;
-            println!(
-                "Estado agora: brilho {}, rotação {}°",
-                s.brightness, s.degree
-            );
+            println!("Estado agora: {}", describe(&screen.connect()?));
         }
         Cmd::Prepare {
             input,
@@ -283,22 +284,19 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             );
         }
         Cmd::List => {
-            let api = HidApi::new()?;
-            let found = devices::detect(&api);
+            let bus = Bus::new()?;
+            let found = bus.detect();
             if found.is_empty() {
                 println!("Nenhuma tela conhecida encontrada.");
                 println!("Modelos suportados:");
-                for k in devices::KNOWN_DEVICES {
-                    println!("  {:04x}:{:04x}  {}", k.vid, k.pid, k.name);
+                for k in KNOWN_DEVICES {
+                    println!("  {}  {}", usb_id(k), k.name);
                 }
                 return Ok(());
             }
             for k in found {
-                print!(
-                    "{:04x}:{:04x}  {} ({}x{})  ",
-                    k.vid, k.pid, k.name, k.width, k.height
-                );
-                match HidTransport::open(&api, k.vid, k.pid) {
+                print!("{}  {} ({}x{})  ", usb_id(k), k.name, k.width, k.height);
+                match bus.open(k) {
                     Ok(_) => println!("[acesso OK]"),
                     Err(e) => {
                         println!("[sem acesso: {e}]");
@@ -308,13 +306,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
             }
         }
         Cmd::Listen { seconds } => {
-            let api = HidApi::new()?;
-            let found = devices::detect(&api);
-            let Some(dev) = found.first() else {
-                eprintln!("Nenhuma tela conhecida encontrada.");
-                std::process::exit(1);
-            };
-            let t = HidTransport::open(&api, dev.vid, dev.pid)?;
+            let (dev, t) = open_hid_raw()?;
             println!("Escutando {} por {seconds}s (somente leitura)...", dev.name);
             let end = Instant::now() + Duration::from_secs(seconds);
             let mut n = 0u32;

@@ -164,8 +164,9 @@ and takes a few minutes. Install the udev rule from
 
 New devices are the most valuable contribution. Open an
 [issue](https://github.com/ninjairocode/telinhas-project/issues) with the
-screen model and the output of `lsusb`. Each device becomes a module in
-`crates/telinhas-core/src/devices/`.
+screen model and the output of `lsusb`. Each device becomes a self-contained
+driver in `crates/telinhas-core/src/devices/`; the step-by-step guide is in
+[docs/ADDING_A_DEVICE.md](docs/ADDING_A_DEVICE.md).
 
 ## Support
 

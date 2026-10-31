@@ -6,21 +6,23 @@ use cosmic::dialog::file_chooser::{self, FileFilter};
 use cosmic::iced::{Alignment, Length, Subscription};
 use cosmic::prelude::*;
 use cosmic::widget::{self, image::Handle, settings};
-use telinhas_core::devices::{thermaltake, DeviceInfo};
-use telinhas_core::imaging;
-use telinhas_core::protocol::by::Status;
+use telinhas_core::devices::{self, DeviceInfo, KNOWN_DEVICES};
+use telinhas_core::{imaging, Capabilities, ScreenStatus};
 
 use crate::worker::{self, Command, Event};
 
-const UDEV_RULES: &str = include_str!("../../../packaging/99-telinhas.rules");
-const ROTATIONS: [&str; 4] = ["0°", "90°", "180°", "270°"];
-const ROTATION_DEGREES: [u16; 4] = [0, 90, 180, 270];
 const PREVIEW_SIZE: f32 = 360.0;
 
 enum Device {
     Searching,
     NoAccess(String),
-    Connected { info: DeviceInfo, status: Status },
+    Connected {
+        info: &'static DeviceInfo,
+        caps: Capabilities,
+        status: ScreenStatus,
+        /// Rótulos do seletor de rotação ("90°"), na ordem de `caps.rotations`.
+        rotation_labels: Vec<String>,
+    },
 }
 
 struct Picture {
@@ -133,7 +135,7 @@ impl cosmic::Application for App {
                             &bytes,
                             info.width,
                             info.height,
-                            imaging::DEFAULT_QUALITY,
+                            jpeg_quality(info),
                         )?)
                     })
                     .await;
@@ -173,7 +175,13 @@ impl cosmic::Application for App {
             }
             Message::BrightnessDrag(v) => self.brightness = v,
             Message::BrightnessRelease => self.send(Command::SetBrightness(self.brightness)),
-            Message::Rotation(i) => self.send(Command::SetRotation(ROTATION_DEGREES[i])),
+            Message::Rotation(i) => {
+                if let Device::Connected { caps, .. } = &self.device {
+                    if let Some(&d) = caps.rotations.get(i) {
+                        self.send(Command::SetRotation(d));
+                    }
+                }
+            }
             Message::CopyUdevCommand => {
                 return cosmic::iced::clipboard::write(udev_command());
             }
@@ -253,24 +261,36 @@ impl cosmic::Application for App {
             );
         content = content.push(image_section);
 
-        if let Device::Connected { status, .. } = &self.device {
-            let rotation = ROTATION_DEGREES.iter().position(|&d| d == status.degree);
-            content = content.push(
-                settings::section()
-                    .title("Ajustes")
-                    .add(
-                        settings::item::builder(format!("Brilho: {}%", self.brightness)).control(
-                            widget::slider(0..=100, self.brightness, Message::BrightnessDrag)
-                                .on_release(Message::BrightnessRelease)
-                                .width(220),
-                        ),
-                    )
-                    .add(settings::item::builder("Rotação").control(widget::dropdown(
-                        &ROTATIONS,
-                        rotation,
-                        Message::Rotation,
-                    ))),
-            );
+        if let Device::Connected {
+            caps,
+            status,
+            rotation_labels,
+            ..
+        } = &self.device
+        {
+            let mut adjust = settings::section().title("Ajustes");
+            if caps.brightness {
+                adjust = adjust.add(
+                    settings::item::builder(format!("Brilho: {}%", self.brightness)).control(
+                        widget::slider(0..=100, self.brightness, Message::BrightnessDrag)
+                            .on_release(Message::BrightnessRelease)
+                            .width(220),
+                    ),
+                );
+            }
+            if !caps.rotations.is_empty() {
+                let selected = status
+                    .rotation
+                    .and_then(|r| caps.rotations.iter().position(|&d| d == r));
+                adjust = adjust.add(settings::item::builder("Rotação").control(widget::dropdown(
+                    rotation_labels.as_slice(),
+                    selected,
+                    Message::Rotation,
+                )));
+            }
+            if caps.brightness || !caps.rotations.is_empty() {
+                content = content.push(adjust);
+            }
         }
 
         widget::scrollable(
@@ -292,22 +312,28 @@ impl App {
         }
     }
 
-    fn screen_info(&self) -> DeviceInfo {
+    fn screen_info(&self) -> &'static DeviceInfo {
         match &self.device {
-            Device::Connected { info, .. } => *info,
-            _ => thermaltake::TH360_V3_ULTRA,
+            Device::Connected { info, .. } => info,
+            _ => &KNOWN_DEVICES[0],
         }
     }
 
     fn on_worker(&mut self, event: Event) {
         match event {
             Event::Ready(tx) => self.cmds = Some(tx),
-            Event::Connected { info, status } => {
-                self.brightness = status.brightness;
-                self.device = Device::Connected { info, status };
+            Event::Connected { info, caps, status } => {
+                self.brightness = status.brightness.unwrap_or(self.brightness);
+                let rotation_labels = caps.rotations.iter().map(|d| format!("{d}°")).collect();
+                self.device = Device::Connected {
+                    info,
+                    caps,
+                    status,
+                    rotation_labels,
+                };
             }
             Event::StatusChanged(new) => {
-                self.brightness = new.brightness;
+                self.brightness = new.brightness.unwrap_or(self.brightness);
                 if let Device::Connected { status, .. } = &mut self.device {
                     *status = new;
                 }
@@ -342,13 +368,18 @@ impl App {
                      USB.\nDetalhe: {why}"
                 )))
                 .into(),
-            Device::Connected { info, status } => section
-                .add(settings::item::builder(info.name).control(widget::text::body("Conectada")))
-                .add(
-                    settings::item::builder("Firmware")
-                        .control(widget::text::body(status.version.firmware.as_str())),
-                )
-                .into(),
+            Device::Connected { info, status, .. } => {
+                let mut section = section.add(
+                    settings::item::builder(info.name).control(widget::text::body("Conectada")),
+                );
+                if let Some(fw) = &status.firmware {
+                    section = section.add(
+                        settings::item::builder("Firmware")
+                            .control(widget::text::body(fw.as_str())),
+                    );
+                }
+                section.into()
+            }
         }
     }
 }
@@ -356,7 +387,13 @@ impl App {
 /// Comando de terminal que instala a regra udev e a recarrega.
 fn udev_command() -> String {
     format!(
-        "sudo tee /etc/udev/rules.d/99-telinhas.rules >/dev/null <<'EOF'\n{UDEV_RULES}EOF\n\
-         sudo udevadm control --reload && sudo udevadm trigger\n"
+        "sudo tee /etc/udev/rules.d/99-telinhas.rules >/dev/null <<'EOF'\n{}EOF\n\
+         sudo udevadm control --reload && sudo udevadm trigger\n",
+        devices::udev_rules()
     )
+}
+
+fn jpeg_quality(info: &DeviceInfo) -> u8 {
+    let devices::FrameFormat::Jpeg { quality } = info.frame;
+    quality
 }

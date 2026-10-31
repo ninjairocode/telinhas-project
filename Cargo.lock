@@ -4639,7 +4639,6 @@ name = "telinhas"
 version = "0.1.0"
 dependencies = [
  "clap",
- "hidapi",
  "telinhas-core",
 ]
 

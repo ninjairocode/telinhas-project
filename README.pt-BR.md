@@ -163,8 +163,9 @@ como em [AppImage](#appimage).
 
 A contribuição mais valiosa são dispositivos novos. Abra uma
 [issue](https://github.com/ninjairocode/telinhas-project/issues) com o modelo
-da tela e a saída do `lsusb`. Cada dispositivo vira um módulo em
-`crates/telinhas-core/src/devices/`.
+da tela e a saída do `lsusb`. Cada dispositivo vira um driver independente em
+`crates/telinhas-core/src/devices/`; o passo a passo está em
+[docs/ADDING_A_DEVICE.md](docs/ADDING_A_DEVICE.md) (em inglês).
 
 ## Suporte
 

@@ -7,18 +7,14 @@ use std::time::{Duration, Instant};
 
 use cosmic::iced::futures::{self, SinkExt, Stream};
 use cosmic::iced::{stream, Subscription};
-use telinhas_core::devices::thermaltake::ThermaltakeLcd;
-use telinhas_core::devices::{self, DeviceInfo};
-use telinhas_core::hidapi::HidApi;
-use telinhas_core::protocol::by::Status;
-use telinhas_core::transport::HidTransport;
-use telinhas_core::{Error, Screen};
+use telinhas_core::devices::{Bus, DeviceInfo};
+use telinhas_core::{Capabilities, Error, Screen, ScreenStatus};
 
 /// Intervalo entre buscas pela tela quando ela não está conectada (ou
 /// verificações de que continua conectada, quando ociosa).
 const SCAN_INTERVAL: Duration = Duration::from_secs(2);
-/// Intervalo entre reenvios do quadro; a tela desiste depois de 5 s.
-const RESEND_INTERVAL: Duration = Duration::from_secs(2);
+/// Reenvio do quadro para telas que não pedem um intervalo próprio.
+const DEFAULT_RESEND: Duration = Duration::from_secs(2);
 
 /// Pedidos da interface para a thread.
 #[derive(Debug, Clone)]
@@ -37,13 +33,14 @@ pub enum Event {
     /// A thread começou; use este canal para mandar comandos.
     Ready(Sender<Command>),
     Connected {
-        info: DeviceInfo,
-        status: Status,
+        info: &'static DeviceInfo,
+        caps: Capabilities,
+        status: ScreenStatus,
     },
     /// A tela está conectada, mas não foi possível abri-la (regra udev).
     NoAccess(String),
     Disconnected(String),
-    StatusChanged(Status),
+    StatusChanged(ScreenStatus),
     Error(String),
 }
 
@@ -79,8 +76,8 @@ enum End {
 }
 
 fn run(cmds: Receiver<Command>, ev: Events) {
-    let mut api = match HidApi::new() {
-        Ok(api) => api,
+    let mut bus = match Bus::new() {
+        Ok(bus) => bus,
         Err(e) => {
             let _ = ev.send(Event::Error(format!("não foi possível iniciar o HID: {e}")));
             return;
@@ -90,19 +87,18 @@ fn run(cmds: Receiver<Command>, ev: Events) {
     let mut last_no_access = None;
 
     loop {
-        let found = match devices::rescan(&mut api) {
-            Ok(found) => found.first().copied().copied(),
+        let found = match bus.rescan() {
+            Ok(found) => found.first().copied(),
             Err(e) => {
                 let _ = ev.send(Event::Error(e.to_string()));
                 None
             }
         };
         if let Some(info) = found {
-            let opened = HidTransport::open(&api, info.vid, info.pid).map(ThermaltakeLcd::new);
-            match opened {
-                Ok(mut lcd) => {
+            match bus.open(info) {
+                Ok(mut screen) => {
                     last_no_access = None;
-                    match session(&mut lcd, info, &mut api, &cmds, &ev, &mut image) {
+                    match session(screen.as_mut(), &mut bus, &cmds, &ev, &mut image) {
                         End::Closed => return,
                         End::Lost(why) => {
                             let _ = ev.send(Event::Disconnected(why));
@@ -133,33 +129,30 @@ fn run(cmds: Receiver<Command>, ev: Events) {
 }
 
 fn session(
-    lcd: &mut ThermaltakeLcd,
-    info: DeviceInfo,
-    api: &mut HidApi,
+    screen: &mut dyn Screen,
+    bus: &mut Bus,
     cmds: &Receiver<Command>,
     ev: &Events,
     image: &mut Option<Arc<Vec<u8>>>,
 ) -> End {
-    match lcd.connect() {
+    let info = screen.info();
+    let resend = info.keepalive.unwrap_or(DEFAULT_RESEND);
+    match screen.connect() {
         Ok(status) => {
-            let _ = ev.send(Event::Connected { info, status });
+            let caps = screen.capabilities();
+            let _ = ev.send(Event::Connected { info, caps, status });
         }
         Err(e) => return End::Lost(e.to_string()),
-    }
-    if image.is_some() {
-        if let Err(e) = lcd.set_realtime(true) {
-            return End::Lost(e.to_string());
-        }
     }
 
     let mut next_frame = Instant::now();
     loop {
         if let Some(jpeg) = image.as_deref() {
             if Instant::now() >= next_frame {
-                if let Err(e) = lcd.show_jpeg(jpeg) {
+                if let Err(e) = screen.show_frame(jpeg) {
                     return End::Lost(e.to_string());
                 }
-                next_frame = Instant::now() + RESEND_INTERVAL;
+                next_frame = Instant::now() + resend;
             }
         }
         let wait = if image.is_some() {
@@ -172,23 +165,22 @@ fn session(
             Ok(Command::Show(jpeg)) => {
                 *image = Some(jpeg);
                 next_frame = Instant::now();
-                // A tela pode ter saído do modo ao vivo por timeout; religa.
-                lcd.set_realtime(true)
+                Ok(())
             }
             Ok(Command::Stop) => {
                 *image = None;
                 Ok(())
             }
-            Ok(Command::SetBrightness(v)) => {
-                lcd.set_brightness(v).and_then(|()| report_status(lcd, ev))
-            }
-            Ok(Command::SetRotation(d)) => {
-                lcd.set_rotation(d).and_then(|()| report_status(lcd, ev))
-            }
+            Ok(Command::SetBrightness(v)) => screen
+                .set_brightness(v)
+                .and_then(|()| report_status(screen, ev)),
+            Ok(Command::SetRotation(d)) => screen
+                .set_rotation(d)
+                .and_then(|()| report_status(screen, ev)),
             Err(RecvTimeoutError::Timeout) if image.is_none() => {
                 // Ocioso: confere se a tela continua ali.
-                match devices::rescan(api) {
-                    Ok(found) if found.iter().any(|d| d.pid == info.pid) => Ok(()),
+                match bus.rescan() {
+                    Ok(found) if found.iter().any(|d| std::ptr::eq(*d, info)) => Ok(()),
                     Ok(_) => return End::Lost("tela desconectada".into()),
                     Err(e) => Err(e),
                 }
@@ -209,8 +201,8 @@ fn session(
 }
 
 /// Relê o estado (o `conn` devolve brilho e rotação gravados) e avisa a interface.
-fn report_status(lcd: &mut ThermaltakeLcd, ev: &Events) -> telinhas_core::Result<()> {
-    let status = lcd.connect()?;
+fn report_status(screen: &mut dyn Screen, ev: &Events) -> telinhas_core::Result<()> {
+    let status = screen.connect()?;
     let _ = ev.send(Event::StatusChanged(status));
     Ok(())
 }
