@@ -1,5 +1,7 @@
 name: AppImage
 
+run-name: Build AppImage
+
 on:
   push:
     branches: [main]
