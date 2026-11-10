@@ -12,6 +12,9 @@ release may change behavior.
   `99-telinhas.rules` it ran after systemd applies the `uaccess` permissions,
   so on some distributions (Fedora, for example) the screen stayed
   inaccessible without root. Remove the old file when updating.
+- The window's minimize, maximize and close buttons were blank outside the
+  COSMIC desktop (the default "Cosmic" icon theme was missing); Telinhas now
+  uses an installed icon theme (Cosmic, Adwaita or Breeze).
 - After the computer woke up from sleep, the screen sometimes stayed on its
   own picture until Telinhas was restarted. Telinhas now notices the wake-up
   and reconnects to the screen by itself.
