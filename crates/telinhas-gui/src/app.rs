@@ -321,19 +321,6 @@ impl cosmic::Application for App {
                 self.readings = self.sensors.sample(&self.config.metrics);
                 self.refresh_preview();
             }
-            Message::ToggleAutostart(enable) if config::in_flatpak() => {
-                return cosmic::task::future(async move {
-                    match config::set_autostart_portal(enable).await {
-                        Ok(true) => Message::AutostartChanged(enable),
-                        Ok(false) => Message::Error("start with the system was not allowed".into()),
-                        // Sem portal Background (caso do COSMIC): grava o atalho direto.
-                        Err(_) => match config::set_autostart(enable) {
-                            Ok(()) => Message::AutostartChanged(enable),
-                            Err(e) => Message::Error(format!("start with the system: {e}")),
-                        },
-                    }
-                });
-            }
             Message::ToggleAutostart(enable) => match config::set_autostart(enable) {
                 Ok(()) => return self.update(Message::AutostartChanged(enable)),
                 Err(e) => self.error = Some(format!("start with the system: {e}")),
@@ -680,7 +667,8 @@ impl App {
 /// Comando de terminal que instala a regra udev e a recarrega.
 fn udev_command() -> String {
     format!(
-        "sudo tee /etc/udev/rules.d/99-telinhas.rules >/dev/null <<'EOF'\n{}EOF\n\
+        "sudo rm -f /etc/udev/rules.d/99-telinhas.rules\n\
+         sudo tee /etc/udev/rules.d/70-telinhas.rules >/dev/null <<'EOF'\n{}EOF\n\
          sudo udevadm control --reload && sudo udevadm trigger\n",
         devices::udev_rules()
     )

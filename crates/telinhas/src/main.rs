@@ -189,7 +189,7 @@ fn main() -> Result<(), Box<dyn std::error::Error>> {
         Cmd::UdevRules => {
             print!("{}", devices::udev_rules());
             eprintln!(
-                "\nInstall with:\n  telinhas udev-rules | sudo tee /etc/udev/rules.d/99-telinhas.rules\n  sudo udevadm control --reload && sudo udevadm trigger\nThen plug the USB cable back in."
+                "\nInstall with:\n  telinhas udev-rules | sudo tee /etc/udev/rules.d/70-telinhas.rules\n  sudo udevadm control --reload && sudo udevadm trigger\nThen plug the USB cable back in."
             );
         }
         Cmd::Probe { dry_run } => {

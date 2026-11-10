@@ -46,7 +46,7 @@ Then register it:
 - add `pub mod <vendor>;` and the `DeviceInfo` to `KNOWN_DEVICES` in
   `crates/telinhas-core/src/devices/mod.rs`;
 - regenerate the udev rule:
-  `cargo run -p telinhas -- udev-rules > packaging/99-telinhas.rules`
+  `cargo run -p telinhas -- udev-rules > packaging/70-telinhas.rules`
   (a test fails if you forget);
 - add a `<modalias>` line to `packaging/io.github.ninjairocode.Telinhas.metainfo.xml`.
 

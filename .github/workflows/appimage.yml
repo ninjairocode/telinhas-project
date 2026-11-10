@@ -34,7 +34,7 @@ jobs:
         run: |
           sudo apt-get install -y appstream desktop-file-utils
           # O appstreamcli do Ubuntu 22.04 é antigo e rejeita campos atuais do
-          # formato; só avisa. A validação de verdade é local e no Flathub.
+          # formato; só avisa. A validação de verdade é feita localmente.
           appstreamcli validate --no-net packaging/$APP_ID.metainfo.xml \
             || echo "::warning::appstreamcli antigo não validou o metainfo"
           desktop-file-validate packaging/$APP_ID.desktop

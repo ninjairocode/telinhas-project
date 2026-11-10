@@ -24,7 +24,8 @@
 Os PCs têm cada vez mais telinhas: visores de watercooler, painéis de gabinete,
 mini monitores USB. Cada marca oferece o próprio app, quase sempre só para
 Windows. O Telinhas quer gerenciar todas elas num único app para Linux, escrito
-em Rust, com interface nativa para o desktop [COSMIC](https://system76.com/cosmic).
+em Rust, com interface gráfica e ferramenta de linha de comando. Ele não está
+ligado a nenhuma distribuição nem ambiente de desktop.
 
 **Hoje você pode:**
 
@@ -41,6 +42,15 @@ em Rust, com interface nativa para o desktop [COSMIC](https://system76.com/cosmi
 - mais métricas e layouts;
 - vídeo.
 
+## Como o Telinhas é feito
+
+O Telinhas é **arquitetado por um humano e programado por IA**. O autor
+([ninjairocode](https://github.com/ninjairocode)) define os objetivos, a
+arquitetura e os recursos, testa cada mudança no hardware real e decide o que
+entra em cada versão. O código, a documentação e o empacotamento são escritos
+com o [Claude](https://claude.com/claude-code), modelo de IA da Anthropic; os
+commits em que ele trabalhou trazem a linha `Co-Authored-By: Claude`.
+
 ## Dispositivos suportados
 
 | Dispositivo | ID USB | Estado |
@@ -53,12 +63,10 @@ veja [Como contribuir](#como-contribuir).
 
 ## Instalação
 
-O Telinhas é distribuído de duas formas:
-
-| Canal | Estado | Atualizações |
-|---|---|---|
-| **AppImage** nas [Releases do GitHub](https://github.com/ninjairocode/telinhas-project/releases) | Disponível | Manual ou com AppImageUpdate (veja [Atualização](#atualização)) |
-| **COSMIC Store** (Flatpak, via Flathub) | Em breve | Automáticas, pela loja |
+Enquanto o projeto está em estágio inicial, o Telinhas é distribuído **só como
+AppImage**, nas [Releases](https://github.com/ninjairocode/telinhas-project/releases)
+deste repositório. Ainda não há pacotes em lojas de aplicativos nem nos
+repositórios das distribuições.
 
 ### AppImage
 
@@ -71,22 +79,19 @@ O Telinhas é distribuído de duas formas:
 3. **Uma vez só:** libere o acesso à tela sem root (regra udev) e depois
    desconecte e reconecte o cabo USB da tela:
    ```
-   ./Telinhas-x86_64.AppImage udev-rules | sudo tee /etc/udev/rules.d/99-telinhas.rules
+   ./Telinhas-x86_64.AppImage udev-rules | sudo tee /etc/udev/rules.d/70-telinhas.rules
    sudo udevadm control --reload && sudo udevadm trigger
    ```
-   Se você pular este passo, o app mostra o comando para copiar.
+   Se você pular este passo, o app mostra o comando para copiar. As versões
+   até a 0.2.1 instalavam a regra como `99-telinhas.rules`, que não funciona em
+   algumas distribuições (no Fedora, por exemplo); apague-a com
+   `sudo rm /etc/udev/rules.d/99-telinhas.rules` e instale a nova.
 4. Abra com dois cliques ou rode `./Telinhas-x86_64.AppImage`.
 
 **Requisitos:** Linux 64 bits (x86_64) com desktop Wayland ou X11 e drivers de
-vídeo funcionando (Vulkan ou OpenGL). A interface foi feita para o COSMIC, mas
-também roda em outros desktops. Se a AppImage não abrir por erro de FUSE (comum
+vídeo funcionando (Vulkan ou OpenGL). Deve funcionar em qualquer distribuição e
+qualquer ambiente de desktop. Se a AppImage não abrir por erro de FUSE (comum
 em contêineres), rode com `--appimage-extract-and-run`.
-
-### COSMIC Store
-
-Em breve. O app será publicado no Flathub, que é a fonte usada pela COSMIC
-Store. A regra udev acima continuará necessária, porque apps Flatpak não
-conseguem instalá-la no sistema sozinhos.
 
 ## Uso
 
@@ -105,7 +110,9 @@ A interface está em inglês; os nomes abaixo são os que aparecem na janela.
 **Segundo plano:** fechar a janela não para a tela; o Telinhas continua
 rodando. Abra-o de novo pelo menu de aplicativos para ver a janela, e use
 **Quit** (barra superior) para encerrar. Ative **Start with the system** para
-restaurar imagem, métricas e ajustes sempre que entrar na sessão.
+restaurar imagem, métricas e ajustes sempre que entrar na sessão. Se o
+computador entrar em modo de descanso, o Telinhas reconecta à tela sozinho
+quando ele acordar.
 
 > [!NOTE]
 > A tela só mantém a imagem escolhida **enquanto o Telinhas estiver rodando**:
@@ -140,29 +147,38 @@ mensagens da linha de comando também estão em inglês.
 | Instalado por | Como atualizar |
 |---|---|
 | **AppImage** | Baixe o novo `Telinhas-x86_64.AppImage` nas [Releases](https://github.com/ninjairocode/telinhas-project/releases/latest) e substitua o arquivo antigo (rode `chmod +x` de novo). Ou use o [AppImageUpdate](https://github.com/AppImageCommunity/AppImageUpdate): `AppImageUpdate Telinhas-x86_64.AppImage` baixa só o que mudou. |
-| **COSMIC Store / Flatpak** | As atualizações chegam pela loja. Pelo terminal: `flatpak update`. |
 | **Código-fonte** | `git pull` e depois `cargo build --release` de novo. |
 
 Não é preciso reinstalar a regra udev ao atualizar, a menos que as notas da
 versão digam o contrário (por exemplo, quando um dispositivo novo for
-adicionado).
+adicionado). Se **Start with the system** estiver ligado e você mover ou
+renomear a AppImage, desligue e ligue a opção de novo para ela apontar para o
+arquivo novo.
 
 Veja o [CHANGELOG.md](CHANGELOG.md) para saber o que mudou em cada versão.
 
 ## Compilar do código-fonte
 
-Requer [Rust](https://rustup.rs) 1.93 ou mais novo e, no Ubuntu/Debian/Pop!_OS:
+Requer [Rust](https://rustup.rs) 1.93 ou mais novo e os arquivos de
+desenvolvimento do udev, do xkbcommon e do Wayland:
 
 ```
-sudo apt install libudev-dev libxkbcommon-dev libwayland-dev pkg-config
+sudo apt install libudev-dev libxkbcommon-dev libwayland-dev pkg-config         # Debian, Ubuntu
+sudo dnf install systemd-devel libxkbcommon-devel wayland-devel pkgconf-pkg-config gcc  # Fedora
+```
+
+Depois:
+
+```
 git clone https://github.com/ninjairocode/telinhas-project.git
 cd telinhas-project
 cargo build --release              # target/release/telinhas-gui e telinhas
 cargo build --release -p telinhas  # só a linha de comando, sem o libcosmic
 ```
 
-O primeiro build baixa e compila o [libcosmic](https://github.com/pop-os/libcosmic)
-e leva alguns minutos. Instale a regra udev de `packaging/99-telinhas.rules`
+A interface usa o kit [libcosmic](https://github.com/pop-os/libcosmic) (funciona
+em qualquer desktop, não só no COSMIC); o primeiro build baixa e compila esse
+kit e leva alguns minutos. Instale a regra udev de `packaging/70-telinhas.rules`
 como em [AppImage](#appimage).
 
 ### Organização do projeto
@@ -171,22 +187,10 @@ como em [AppImage](#appimage).
 |---|---|
 | `crates/telinhas-core` | Drivers, transportes, protocolos, imagens/GIFs, sensores, desenho das métricas |
 | `crates/telinhas` | Ferramenta de linha de comando |
-| `crates/telinhas-gui` | Interface COSMIC (libcosmic) |
+| `crates/telinhas-gui` | Interface gráfica (kit libcosmic) |
 | `packaging/` | Regra udev, atalho do menu, metadados AppStream, ícones |
-| `packaging/flatpak/` | Manifesto Flatpak |
 | `docs/PROTOCOL.md` | Notas sobre o protocolo "BY" da Thermaltake (em inglês) |
 | `docs/ADDING_A_DEVICE.md` | Como adicionar uma tela nova (em inglês) |
-
-### Flatpak
-
-```
-sudo apt install flatpak-builder python3-aiohttp python3-tomlkit python3-yaml
-curl -O https://raw.githubusercontent.com/flatpak/flatpak-builder-tools/master/cargo/flatpak-cargo-generator.py
-python3 flatpak-cargo-generator.py Cargo.lock -o packaging/flatpak/cargo-sources.json
-flatpak-builder --user --install --install-deps-from=flathub --force-clean \
-  build-dir packaging/flatpak/io.github.ninjairocode.Telinhas.yml
-flatpak run io.github.ninjairocode.Telinhas
-```
 
 A fonte Noto Sans em `crates/telinhas-core/assets/fonts/` está sob a SIL Open
 Font License 1.1 (`OFL.txt` ao lado dela).

@@ -3,7 +3,7 @@
 
 use std::sync::mpsc::{self, Receiver, RecvTimeoutError, Sender};
 use std::sync::Arc;
-use std::time::{Duration, Instant};
+use std::time::{Duration, Instant, SystemTime};
 
 use cosmic::iced::futures::{self, SinkExt, Stream};
 use cosmic::iced::{stream, Subscription};
@@ -21,6 +21,36 @@ const SCAN_INTERVAL: Duration = Duration::from_secs(2);
 const DEFAULT_RESEND: Duration = Duration::from_secs(2);
 /// A cada quanto tempo reler as métricas.
 const METRICS_INTERVAL: Duration = Duration::from_secs(1);
+/// Diferença entre o relógio de parede e o monotônico que indica que o
+/// computador dormiu (suspensão/hibernação) desde a última volta do laço.
+const SLEEP_GAP: Duration = Duration::from_secs(5);
+
+/// Detecta que o sistema dormiu. O `Instant` (CLOCK_MONOTONIC) para durante a
+/// suspensão e o relógio de parede não; uma diferença grande entre os dois
+/// significa que o computador acabou de acordar.
+struct SleepDetector {
+    wall: SystemTime,
+    mono: Instant,
+}
+
+impl SleepDetector {
+    fn new() -> Self {
+        Self {
+            wall: SystemTime::now(),
+            mono: Instant::now(),
+        }
+    }
+
+    /// `true` se o sistema dormiu desde a chamada anterior.
+    fn woke_up(&mut self) -> bool {
+        let (wall, mono) = (SystemTime::now(), Instant::now());
+        let wall_elapsed = wall.duration_since(self.wall).unwrap_or_default();
+        let mono_elapsed = mono - self.mono;
+        self.wall = wall;
+        self.mono = mono;
+        wall_elapsed > mono_elapsed + SLEEP_GAP
+    }
+}
 
 /// Métricas escolhidas e a última leitura.
 struct Overlay {
@@ -125,6 +155,10 @@ enum End {
     Closed,
     /// A tela sumiu ou parou de responder: voltar a procurar.
     Lost(String),
+    /// O computador acordou: reabrir a tela e refazer o handshake sem avisar
+    /// a interface (a tela pode ter perdido energia e reiniciado durante a
+    /// suspensão, e continuaria ignorando os quadros em silêncio).
+    Resumed,
 }
 
 fn run(cmds: Receiver<Command>, ev: Events) {
@@ -162,6 +196,11 @@ fn run(cmds: Receiver<Command>, ev: Events) {
                         End::Closed => return,
                         End::Lost(why) => {
                             let _ = ev.send(Event::Disconnected(why));
+                        }
+                        // Reabre depois do intervalo de busca abaixo, dando
+                        // tempo para o USB ser reconhecido de novo.
+                        End::Resumed => {
+                            eprintln!("telinhas: system woke up; reconnecting to the screen");
                         }
                     }
                 }
@@ -219,7 +258,11 @@ fn session(screen: &mut dyn Screen, ctx: Session) -> End {
 
     let mut player = Player::default();
     let mut next_frame = Instant::now();
+    let mut sleep = SleepDetector::new();
     loop {
+        if sleep.woke_up() {
+            return End::Resumed;
+        }
         if let Some(frames) = image.as_deref() {
             if Instant::now() >= next_frame {
                 let frame = player.current(frames);

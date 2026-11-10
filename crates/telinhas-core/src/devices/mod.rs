@@ -98,7 +98,11 @@ impl Bus {
 /// Regras udev que dão ao usuário da sessão acesso a todos os modelos
 /// conhecidos, sem root.
 pub fn udev_rules() -> String {
-    let mut out = String::from("# Telinhas: access to the supported mini screens without root.\n");
+    let mut out = String::from(
+        "# Telinhas: access to the supported mini screens without root.\n\
+         # Install as /etc/udev/rules.d/70-telinhas.rules: the number must be below\n\
+         # 73, where systemd turns the \"uaccess\" tag into user permissions.\n",
+    );
     for d in KNOWN_DEVICES {
         let _ = writeln!(out, "# {}", d.name);
         match d.connection {
@@ -119,12 +123,12 @@ mod tests {
 
     #[test]
     fn regra_udev_do_pacote_esta_atualizada() {
-        let packaged = include_str!("../../../../packaging/99-telinhas.rules");
+        let packaged = include_str!("../../../../packaging/70-telinhas.rules");
         assert_eq!(
             packaged,
             udev_rules(),
-            "packaging/99-telinhas.rules difere de devices::udev_rules(); \
-             atualize com `telinhas udev-rules > packaging/99-telinhas.rules`"
+            "packaging/70-telinhas.rules difere de devices::udev_rules(); \
+             atualize com `telinhas udev-rules > packaging/70-telinhas.rules`"
         );
     }
 }

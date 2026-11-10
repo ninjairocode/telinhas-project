@@ -40,6 +40,11 @@
       Accessing the screen requires a udev rule on the host; the app shows the
       command to install it.
     </p>
+    <p>
+      Telinhas is architected by a human and coded by AI: the author defines
+      the design and tests every change on real hardware; the code is written
+      with Anthropic's Claude.
+    </p>
   </description>
 
   <screenshots>
@@ -83,6 +88,14 @@
   <content_rating type="oars-1.1" />
 
   <releases>
+    <release version="0.2.2" date="2026-11-10">
+      <description>
+        <p>
+          Reconnects to the screen by itself after the computer wakes up from
+          sleep. Distributed only as an AppImage for now.
+        </p>
+      </description>
+    </release>
     <release version="0.2.1" date="2026-10-31">
       <description>
         <p>

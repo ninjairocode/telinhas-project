@@ -4,6 +4,25 @@ All notable changes to Telinhas are listed here. Versions follow
 [Semantic Versioning](https://semver.org); while the version is `0.x`, any
 release may change behavior.
 
+## [0.2.2] - 2026-11-10
+
+### Fixed
+
+- The udev rule is now installed as `70-telinhas.rules`. As
+  `99-telinhas.rules` it ran after systemd applies the `uaccess` permissions,
+  so on some distributions (Fedora, for example) the screen stayed
+  inaccessible without root. Remove the old file when updating.
+- After the computer woke up from sleep, the screen sometimes stayed on its
+  own picture until Telinhas was restarted. Telinhas now notices the wake-up
+  and reconnects to the screen by itself.
+
+### Changed
+
+- Distribution is AppImage-only for now; the Flatpak manifest and the Flatpak
+  code paths were removed.
+- Documentation no longer ties the project to a specific distribution or
+  desktop, and states how it is made: architected by a human, coded by AI.
+
 ## [0.2.1] - 2026-10-31
 
 ### Changed
@@ -54,6 +73,7 @@ First public release. Early stage: one supported device.
   `listen`, `udev-rules`.
 - AppImage built by GitHub Actions, with update information for AppImageUpdate.
 
+[0.2.2]: https://github.com/ninjairocode/telinhas-project/releases/tag/v0.2.2
 [0.2.1]: https://github.com/ninjairocode/telinhas-project/releases/tag/v0.2.1
 [0.2.0]: https://github.com/ninjairocode/telinhas-project/releases/tag/v0.2.0
 [0.1.0]: https://github.com/ninjairocode/telinhas-project/releases/tag/v0.1.0

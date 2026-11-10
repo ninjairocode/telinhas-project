@@ -1,6 +1,6 @@
 //! Métricas do sistema para mostrar na tela: temperaturas (hwmon) e uso de
-//! CPU e RAM (`/proc`). Lê arquivos do kernel diretamente, o que também
-//! funciona dentro do Flatpak.
+//! CPU e RAM (`/proc`). Lê arquivos do kernel diretamente, sem depender de
+//! bibliotecas de sistema.
 
 use std::path::{Path, PathBuf};
 

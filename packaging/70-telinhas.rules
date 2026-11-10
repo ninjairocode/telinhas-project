@@ -1,3 +1,5 @@
 # Telinhas: access to the supported mini screens without root.
+# Install as /etc/udev/rules.d/70-telinhas.rules: the number must be below
+# 73, where systemd turns the "uaccess" tag into user permissions.
 # Thermaltake TH360 V3 Ultra ARGB Sync (LCD)
 SUBSYSTEM=="hidraw", ATTRS{idVendor}=="264a", ATTRS{idProduct}=="2348", MODE="0660", TAG+="uaccess"

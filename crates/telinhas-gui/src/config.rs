@@ -10,7 +10,7 @@ use telinhas_core::sensors::Metric;
 use crate::app::APP_ID;
 
 /// Nome do arquivo de fundo guardado na pasta de configuração (o caminho
-/// original pode sumir; no Flatpak ele é temporário).
+/// original pode ser movido ou apagado).
 const BACKGROUND_STEM: &str = "background";
 
 #[derive(Debug, Clone, Default, PartialEq, Eq, Serialize, Deserialize)]
@@ -100,17 +100,9 @@ impl Config {
 
 /// Liga ou desliga o início automático com a sessão (XDG autostart).
 pub fn set_autostart(enable: bool) -> io::Result<()> {
-    // No Flatpak, XDG_CONFIG_HOME aponta para dentro do sandbox; o atalho
-    // precisa ir para o ~/.config do sistema (permissão
-    // `--filesystem=xdg-config/autostart:create` no manifesto).
-    let config = if in_flatpak() {
-        std::env::var_os("HOME")
-            .map(|h| PathBuf::from(h).join(".config"))
-            .unwrap_or_else(xdg_config_home)
-    } else {
-        xdg_config_home()
-    };
-    let path = config.join("autostart").join(format!("{APP_ID}.desktop"));
+    let path = xdg_config_home()
+        .join("autostart")
+        .join(format!("{APP_ID}.desktop"));
     if !enable {
         return match std::fs::remove_file(&path) {
             Err(e) if e.kind() == io::ErrorKind::NotFound => Ok(()),
@@ -119,14 +111,10 @@ pub fn set_autostart(enable: bool) -> io::Result<()> {
     }
     // Na AppImage, o executável real fica num ponto de montagem temporário;
     // `$APPIMAGE` aponta para o arquivo que o usuário guardou.
-    let exec = if in_flatpak() {
-        format!("flatpak run --command=telinhas-gui {APP_ID} --background")
-    } else {
-        let exe = std::env::var_os("APPIMAGE")
-            .map(PathBuf::from)
-            .map_or_else(std::env::current_exe, Ok)?;
-        format!("\"{}\" --background", exe.display())
-    };
+    let exe = std::env::var_os("APPIMAGE")
+        .map(PathBuf::from)
+        .map_or_else(std::env::current_exe, Ok)?;
+    let exec = format!("\"{}\" --background", exe.display());
     std::fs::create_dir_all(path.parent().expect("caminho tem pasta"))?;
     std::fs::write(
         &path,
@@ -137,25 +125,4 @@ pub fn set_autostart(enable: bool) -> io::Result<()> {
              X-GNOME-Autostart-enabled=true\n"
         ),
     )
-}
-
-/// Está rodando dentro do Flatpak?
-pub fn in_flatpak() -> bool {
-    std::env::var_os("FLATPAK_ID").is_some()
-}
-
-/// No Flatpak, o início automático é pedido ao portal Background. Devolve se
-/// o pedido foi concedido; erro se o portal não existir (o COSMIC, por
-/// exemplo, não o implementa) ou falhar.
-pub async fn set_autostart_portal(enable: bool) -> Result<bool, String> {
-    use ashpd::desktop::background::Background;
-    let response = Background::request()
-        .reason("Keep the image on your mini screens after you log in")
-        .auto_start(enable)
-        .command(["telinhas-gui", "--background"])
-        .send()
-        .await
-        .and_then(|r| r.response())
-        .map_err(|e| e.to_string())?;
-    Ok(response.auto_start() == enable)
 }
